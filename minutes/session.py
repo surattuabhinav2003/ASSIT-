@@ -47,7 +47,7 @@ class Session:
             raise
         self.t0 = self.capture.t0
         if app == "Teams":
-            self.roster = names.TeamsRoster(self.t0, self.you_name)
+            self.roster = names.TeamsRoster(self.t0, self.you_name, dump_path=store.track_path(self.mid, "x").replace("x.wav", "teams_labels.txt"))
         self.recording = True
         threading.Thread(target=self._autosave, daemon=True, name="autosave").start()
         self.log(f"[session] recording {self.mid}: {self.capture.devices()}")

@@ -65,8 +65,10 @@ def parse_label(label):
 class TeamsRoster:
     """Polls the Teams meeting window while a meeting is recorded."""
 
-    def __init__(self, t0, you_name=""):
+    def __init__(self, t0, you_name="", dump_path=""):
         self.t0, self.you_name = t0, you_name
+        self.dump_path = dump_path                  # teams_labels.txt in the meeting's folder: what Teams exposed, for tuning
+        self._next_dump = 20.0
         self.names = {}                  # name -> times seen
         self.timeline = []               # {"t", "speaking": [...], "unmuted": [...]} when something changed
         self.reads = 0
@@ -84,6 +86,27 @@ class TeamsRoster:
         with self._lock:
             return {"names": [n for n, c in sorted(self.names.items(), key=lambda kv: -kv[1])],
                     "timeline": list(self.timeline), "reads": self.reads, "ok": self.ok, "samples": list(self.samples)}
+
+    def _maybe_dump(self, labels, window):
+        """The whole list of labels Teams exposes, 20 s into the meeting and then every 3 minutes (a meeting's roster and
+        captions change as people join). Written only to this laptop, in the meeting's own folder."""
+        now = time.time() - self.t0
+        if not self.dump_path or now < self._next_dump:
+            return
+        self._next_dump = now + 180.0
+        try:
+            seen, lines = set(), []
+            for x in labels:
+                x = (x or "").strip()
+                if x and x not in seen and len(x) <= 240:
+                    seen.add(x)
+                    lines.append(("PERSON  " if parse_label(x) else "        ") + repr(x))
+            with open(self.dump_path, "a", encoding="utf-8") as f:
+                f.write(f"\n=== {int(now)} s into the meeting | window {window.get('title')!r} kind={window.get('kind')} | "
+                        f"{len(labels)} elements, {len(lines)} distinct labels\n")
+                f.write("\n".join(lines[:1500]) + "\n")
+        except OSError:
+            pass
 
     # ---- UI Automation ----
     def _setup(self):
@@ -112,9 +135,12 @@ class TeamsRoster:
         while not self._stop.wait(1.0):
             try:
                 w = teams.teams_window()
-                if not w or w["kind"] == "main" or w.get("minimized"):
+                if not w or w.get("minimized"):
                     continue
                 labels = self._labels(U, uia, cache, w["hwnd"])
+                self._maybe_dump(labels, w)
+                if w["kind"] == "main":
+                    continue                    # the Teams chat window: kept in the dump, not read for people
                 people = [p for p in (parse_label(x) for x in labels) if p]
                 with self._lock:
                     for x in labels:
