@@ -208,14 +208,15 @@ def _echoes_hint(text, prompt):
     return bool(t) and (t in p or (len(t.split()) <= 12 and all(w in p.split() for w in t.split())))
 
 
-def retranscribe(client, path, spans, names, log=print):
-    """{span index: text} for stretches of the microphone track; a stretch that fails is left out (live text stays)."""
+def retranscribe(client, path, spans, names, log=print, language="en", min_s=0.9):
+    """{span index: text} for stretches of a track; a stretch that fails is left out (the text already there stays)."""
     x = read_wav(path)
     prompt = hint(names)
+    lang = {"en": "en", "te": "te"}.get(language)            # mixed: no language, the model decides
 
     def one(i):
         t0, t1 = spans[i]
-        if t1 - t0 < 0.9:
+        if t1 - t0 < min_s:
             return i, None                                 # too short to be worth a second look: the live text stays
         a, b = max(0, int((t0 - 0.25) * RATE)), min(len(x), int((t1 + 0.4) * RATE))
         piece = normalised(x[a:b])
@@ -223,7 +224,8 @@ def retranscribe(client, path, spans, names, log=print):
             return i, None
         for attempt in range(2):
             try:
-                r = client.audio.transcriptions.create(model="gpt-4o-transcribe", language="en", prompt=prompt,
+                extra = {"language": lang} if lang else {}
+                r = client.audio.transcriptions.create(model="gpt-4o-transcribe", prompt=prompt, **extra,
                                                        file=("you.wav", to_wav_bytes(piece), "audio/wav"))
                 text = (r.text or "").strip()
                 return i, (None if _echoes_hint(text, prompt) else text)
@@ -356,6 +358,36 @@ def _small_change(a, b):
     return sum(1 for x, y in zip(wa, wb) if x != y) <= max(3, len(wa) // 4)
 
 
+# ---------------------------------------------------------------- Telugu and English
+LATINISE = """You clean up a transcript of a business meeting where people speak Telugu, English, or both. The speech-to-text wrote English
+words in Telugu letters (for example "ఫ్రైడే", "పైలట్ స్టార్ట్", "యూజర్ లిస్ట్", "డేవ్"). Rewrite each line so that:
+- English words, product names and people's names that were spoken in English are written in English letters ("Friday", "pilot start", "user list", "Dave", "SharePoint").
+- Telugu words stay in Telugu script, unchanged.
+- Nothing is added, removed, translated or reordered. Keep the punctuation. A line that is all English or all Telugu words with no English in it stays as it is.
+Reply JSON: {"lines": [...]} with exactly as many lines, in the same order."""
+
+
+def latinise(client, rows, names, log=print):
+    """Telugu and mixed meetings: English words back into English letters."""
+    v = vocab()
+    out = []
+    texts = [r["text"] for r in rows]
+    for i in range(0, len(texts), 40):
+        batch = texts[i:i + 40]
+        try:
+            r = _chat_json(client, LATINISE, json.dumps({"known_names_and_terms": [*names, *v["keywords"], *v["products"]],
+                                                         "lines": batch}, ensure_ascii=False))
+            got = r.get("lines")
+            ok = isinstance(got, list) and len(got) == len(batch) and all(isinstance(g, str) and g.strip() for g in got)
+        except Exception as e:
+            log(f"[finish] English words in Telugu text left as heard ({type(e).__name__})")
+            ok = False
+        out += got if ok else batch
+    for r, t in zip(rows, out):
+        r["text"] = t
+    return rows
+
+
 # ---------------------------------------------------------------- 5. the minutes
 MOM_SYSTEM = """You write short, accurate minutes of a meeting from its transcript, for the people who were there and for
 colleagues who were not. Plain, neutral professional English. Facts only: use what was said, never add, assume or
@@ -370,8 +402,15 @@ Dates: keep them as spoken ("Friday", "next Tuesday") unless an exact date was s
 Speaker names in the transcript are the best known; a speaker shown as "Speaker N" has no name yet: keep that label.
 Reply JSON: {"title": "", "summary": [], "decisions": [], "actions": [], "open_questions": []}"""
 
+MOM_IN_ENGLISH = ("\nThe meeting may be in Telugu, English or both. Write the minutes in ENGLISH regardless; keep people's names and product "
+                  "names as they are. Dates and days stay as said.")
+MOM_IN_MEETING = ("\nThe meeting may be in Telugu, English or both. Write the minutes in the language of the meeting: Telugu in Telugu "
+                  "script where Telugu was spoken, with English terms, names and products in English letters.")
 
-def make_minutes(client, meta, rows, log=print):
+
+def make_minutes(client, meta, rows, log=print, minutes_language="english"):
+    system = MOM_SYSTEM + (MOM_IN_MEETING if minutes_language == "meeting" and meta.get("language", "en") != "en" else
+                           MOM_IN_ENGLISH if meta.get("language", "en") != "en" else "")
     if not rows:
         return {"title": meta.get("title") or "Meeting", "summary": ["Nothing was said."], "decisions": [], "actions": [],
                 "open_questions": []}
@@ -380,10 +419,10 @@ def make_minutes(client, meta, rows, log=print):
     # a very long meeting is summarised in parts, then the parts are joined
     if len(transcript) > 90000:
         parts = [transcript[i:i + 80000] for i in range(0, len(transcript), 80000)]
-        partials = [_chat_json(client, MOM_SYSTEM, json.dumps({"meeting_title": meta.get("title"), "date": when,
+        partials = [_chat_json(client, system, json.dumps({"meeting_title": meta.get("title"), "date": when,
                                                                "transcript": p}, ensure_ascii=False)) for p in parts]
         transcript = "Minutes of the parts of this meeting:\n" + json.dumps(partials, ensure_ascii=False)
-    m = _chat_json(client, MOM_SYSTEM, json.dumps({"meeting_title": meta.get("title"), "date": when,
+    m = _chat_json(client, system, json.dumps({"meeting_title": meta.get("title"), "date": when,
                                                    "transcript": transcript}, ensure_ascii=False), effort="medium")
     return {"title": str(m.get("title") or meta.get("title") or "Meeting"),
             "summary": [str(x) for x in m.get("summary") or []],
@@ -406,12 +445,13 @@ def run(client, mid, roster=None, you_name="", status=lambda s: None, log=print)
     you_name = you_name or meta.get("you") or "You"
     roster_names = [n for n in (roster or {}).get("names", []) if n != you_name]
     rows = []
+    language = meta.get("language") or "en"
 
     you_live = [r for r in live if r["side"] == "you" and r.get("text", "").strip()]
     status("Transcribing both sides")
     pool = cf.ThreadPoolExecutor(max_workers=2)
     f_others = pool.submit(diarize, client, others_p, log) if os.path.isfile(others_p) else None
-    f_you = (pool.submit(retranscribe, client, you_p, [(r["t0"], r["t1"]) for r in you_live], roster_names, log)
+    f_you = (pool.submit(retranscribe, client, you_p, [(r["t0"], r["t1"]) for r in you_live], roster_names, log, language)
              if os.path.isfile(you_p) and you_live else None)
     voices = None
     if f_others:
@@ -424,6 +464,12 @@ def run(client, mid, roster=None, you_name="", status=lambda s: None, log=print)
         single = True
     else:
         single = False
+        if language != "en" and voices:
+            # The separation model writes Telugu in Latin letters ("Weeklow"): useful for WHO spoke WHEN, not as text.
+            # Each stretch is transcribed again with the better model, in the language of the meeting.
+            status("Transcribing Telugu")
+            again = retranscribe(client, others_p, [(v["t0"], v["t1"]) for v in voices], roster_names, log, language, min_s=0.4)
+            voices = [dict(v, text=again[i]) for i, v in enumerate(voices) if i in again]
     by_voice = {}
     for v in voices:
         by_voice.setdefault(v["voice"], []).append(v)
@@ -445,13 +491,17 @@ def run(client, mid, roster=None, you_name="", status=lambda s: None, log=print)
     rows.sort(key=lambda r: (r["t0"], r["t1"]))
     for i, r in enumerate(rows):
         r["id"] = i + 1
+    if language != "en":
+        status("Writing English words in English")
+        rows = latinise(client, rows, [you_name, *roster_names], log)
     rows = polish_safe(client, rows, roster_names, you_name, status, log)
     store.save_lines(mid, rows)
 
     # the minutes
     status("Writing the minutes")
     attendees = list(dict.fromkeys([you_name] + [r["speaker"] for r in rows if not r["speaker"].startswith(("Speaker ", "Others"))]))
-    mom = make_minutes(client, meta, rows, log)
+    from . import config
+    mom = make_minutes(client, meta, rows, log, config.load_settings().get("minutes_language", "english"))
     mom["speaker_names"] = {"matched": named, "confidence": conf}
     store.save_mom(mid, mom)
     title = meta.get("title") or ""

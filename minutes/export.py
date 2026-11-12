@@ -48,6 +48,11 @@ def minutes_docx(mid, path, with_transcript=False):
     blue = RGBColor(0x01, 0x29, 0xAC)
     d = Document()
     d.styles["Normal"].font.name = "Calibri"
+    try:                                       # Telugu letters need a Telugu font: Word picks the complex-script font for them
+        from docx.oxml.ns import qn
+        d.styles["Normal"].element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:cs"), "Nirmala UI")
+    except Exception:
+        pass
     d.styles["Normal"].font.size = Pt(11)
     h = d.add_heading(meta.get("title") or "Meeting", level=0)
     for r in h.runs:

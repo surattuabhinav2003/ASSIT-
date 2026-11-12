@@ -53,8 +53,13 @@ def fix_names(text):
     return text
 
 
+LANGUAGE = "en"                   # set by the session: "en", "te", or None to let the model decide (Telugu and English mixed)
+
+
 def _transcription_config():
-    cfg = {"model": MODEL, "language": "en"}
+    cfg = {"model": MODEL}
+    if LANGUAGE:
+        cfg["language"] = LANGUAGE
     if MODEL == "gpt-realtime-whisper":
         cfg["delay"] = os.getenv("COPILOT_STREAM_DELAY", "minimal")
     elif MODEL in ("gpt-live-transcribe", "gpt-transcribe"):

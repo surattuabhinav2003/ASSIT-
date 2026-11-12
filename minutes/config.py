@@ -12,10 +12,16 @@ load_dotenv(paths.CONFIG_ENV)
 load_dotenv(os.path.join(paths.CODE, ".env"))
 
 LIVE_MODEL = os.getenv("MINUTES_LIVE_MODEL", "gpt-live-transcribe")           # words while people talk
+LIVE_MODEL_TELUGU = os.getenv("MINUTES_LIVE_MODEL_TELUGU", "gpt-4o-transcribe")   # live words for Telugu and mixed speech (measured: clean Telugu script)
 DIARIZE_MODEL = os.getenv("MINUTES_DIARIZE_MODEL", "gpt-4o-transcribe-diarize")  # who said what, after the meeting
 MOM_MODEL = os.getenv("MINUTES_MOM_MODEL", "gpt-6-sol")                       # names clean-up and the minutes
 
+# what is spoken in the meeting: the live transcription and the after-meeting pass are told
+LANGUAGES = {"en": "English", "te": "Telugu", "mixed": "Telugu and English mixed"}
+
 DEFAULTS = {
+    "language": "en",            # en | te | mixed (people switch between Telugu and English)
+    "minutes_language": "english",   # english: minutes always in English | meeting: in the language spoken
     "auto_start": True,          # start recording by itself when a Teams meeting starts
     "keep_audio": True,          # keep the two audio tracks on this laptop (the transcript is always kept)
     "audio_days": 30,            # audio older than this is deleted; the transcript and minutes stay

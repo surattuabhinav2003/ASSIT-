@@ -27,8 +27,13 @@ class Session:
         self._stop_evt = threading.Event()
 
     # ---------------------------------------------------------------- recording
-    def start(self, title, app, keep_audio=True):
+    def start(self, title, app, keep_audio=True, language="en"):
+        from . import stream
+        stream.LANGUAGE = {"en": "en", "te": "te"}.get(language)            # mixed: the model decides, word by word
+        # the English live model writes mixed speech in Latin letters ("eweeklow"); this one writes Telugu script
+        stream.MODEL = config.LIVE_MODEL if language == "en" else config.LIVE_MODEL_TELUGU
         meta = store.create(title, app, self.you_name)
+        store.update(meta["id"], language=language)
         self.mid = meta["id"]
         self.capture = Capture(self.client, self._event, on_level=self._level)
         self.capture.start(store.track_path(self.mid, "others") if keep_audio else None,
@@ -136,6 +141,8 @@ class Session:
         try:
             finish.run(self.client, self.mid, roster=roster, you_name=self.you_name,
                        status=lambda s: setattr(self, "status", s), log=self.log)
+            if not config.load_settings().get("keep_audio", True):
+                store.delete_audio(self.mid)            # the person chose not to keep the recordings
         except Exception as e:
             self.log("[session] after-meeting pass failed: " + traceback.format_exc())
             store.update(self.mid, status="error", error=f"{type(e).__name__}: {str(e)[:200]}")

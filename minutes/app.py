@@ -101,8 +101,17 @@ class Api:
         return self._app.live()
 
     # recording
-    def start(self, title=""):
-        return self._app.start_recording(title, "Manual", manual=True)
+    def start(self, title="", language=""):
+        return self._app.start_recording(title, "Manual", manual=True, language=language)
+
+    def open_actions(self):
+        """Action items from the latest meetings, newest first, for the Home page."""
+        out = []
+        for m in store.listing()[:12]:
+            for a in (store.mom(m["id"]) or {}).get("actions", []):
+                out.append({"meeting": m["id"], "title": m.get("title") or "Meeting", "started": m.get("started"),
+                            "owner": a.get("owner") or "", "task": a.get("task") or "", "due": a.get("due") or ""})
+        return out[:12]
 
     def stop(self):
         return self._app.stop_recording()
@@ -264,7 +273,8 @@ class App:
     def state(self):
         rec = bool(self.session and self.session.recording)
         busy = [m["id"] for m in store.listing() if m.get("status") == "processing"]
-        return {"version": __version__, "key": bool(config.api_key()), "recording": rec, "auto": self.settings["auto_start"],
+        return {"version": __version__, "key": bool(config.api_key()), "recording": rec, "auto": self.settings["auto_start"], "language": self.settings.get("language", "en"),
+                "languages": config.LANGUAGES, "elapsed": round(time.time() - self.session.t0) if self.session and self.session.recording else 0,
                 "you": self.you_name(), "suggestion": self.suggestion, "processing": busy, "home": paths.HOME,
                 "meeting_id": self.session.mid if self.session else None,
                 "update": getattr(getattr(self, "updates", None), "state", {"error": "", "version": ""})}
@@ -276,7 +286,7 @@ class App:
         return s.live()
 
     # ---- recording
-    def start_recording(self, title, app_name, manual=False):
+    def start_recording(self, title, app_name, manual=False, language=""):
         if self.session and self.session.recording:
             return {"ok": False, "error": "Already recording."}
         client = self.get_client()
@@ -284,7 +294,8 @@ class App:
             return {"ok": False, "error": "Add your OpenAI key first (Settings)."}
         try:
             self.session = Session(client, self.you_name(), log=log)
-            mid = self.session.start(title, app_name, keep_audio=True)
+            lang = language if language in config.LANGUAGES else self.settings.get("language", "en")
+            mid = self.session.start(title, app_name, keep_audio=True, language=lang)
         except Exception as e:
             log("[app] could not start: " + traceback.format_exc())
             self.session = None
