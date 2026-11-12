@@ -255,6 +255,8 @@ async function renderHome() {
   if (S.suggestion && !S.recording) wrap.append(h("div", { class: "banner info" }, h("span", { class: "grow", text: `${S.suggestion.app} is using your microphone. Is this a meeting you want to record?` }),
     h("button", { class: "btn primary", onclick: () => startRecording(), text: "Record it" }), h("button", { class: "btn", onclick: async () => { await api().dismiss_suggestion(); await poll(); render(); }, text: "Not now" })));
   if (S.update && S.update.error) wrap.append(h("div", { class: "banner warn", text: "Updates: " + S.update.error }));
+  if (S.problem && !S.recording) wrap.append(h("div", { class: "banner bad" }, h("span", { class: "grow", text: (S.problem.gave_up ? "Automatic recording could not start and stopped trying: " : "Automatic recording could not start (trying again shortly): ") + S.problem.text }),
+    h("button", { class: "btn", onclick: () => startRecording(), text: "Record now" })));
   if (S.recording) {
     wrap.append(h("div", { class: "card recordcard live" }, h("div", {}, h("h3", { text: "Recording in progress" }), h("p", { class: "hint", text: `${langName(S.language)} · ${stamp(S.elapsed)} so far` })),
       h("div", { style: "display:flex;gap:8px" }, h("button", { class: "btn big", onclick: () => go("live") }, "Open live view"), h("button", { class: "btn big red", onclick: stopRecording }, "Stop"))));
@@ -358,6 +360,7 @@ function drawMeeting() {
   const node = h("div", { class: "wrap" }, h("div", { class: "pagehead" }, backBtn()),
     h("div", { class: "mhead" }, title, h("div", { class: "mmeta", text: `${whenTxt} · ${mins} min${meta.app ? " · " + meta.app : ""}${lang}` }), chips));
   if (meta.status === "processing" || meta.status === "recording") { node.append(processingNode(meta)); setView(node); pollProcessing(meta.id, meta.language); return; }
+  for (const w of (meta.warnings || [])) node.append(h("div", { class: "banner warn", text: w }));
   if (meta.status === "error") node.append(h("div", { class: "banner bad" }, h("span", { class: "grow", text: `Something went wrong writing this meeting: ${meta.error || "unknown error"}. The recording is safe.` }), h("button", { class: "btn", onclick: async () => { await api().reprocess(meta.id); renderMeetingPage(); }, text: "Try again" })));
   node.append(h("div", { class: "tabs" }, ...[["minutes", "Minutes"], ["transcript", "Transcript"]].map(([k, l]) => h("button", { class: "tab" + (tab === k ? " on" : ""), onclick: () => { tab = k; editing = false; drawMeeting(); } }, l))));
   const body = h("div"); node.append(body);
@@ -460,6 +463,7 @@ async function renderSettings() {
   const days = h("input", { type: "number", min: 0, max: 365, value: cfg.audio_days }); days.onchange = () => api().set_settings({ audio_days: Math.max(0, +days.value || 0) });
   const key = h("input", { type: "password", placeholder: "sk-...", autocomplete: "off" }), kerr = h("div", { class: "err-text" }), saveKey = h("button", { class: "btn primary", text: "Save key" });
   saveKey.onclick = async () => { kerr.textContent = ""; saveKey.disabled = true; const r = await api().set_key(key.value); saveKey.disabled = false; if (r.ok) { key.value = ""; toast("Key saved"); await poll(); renderSettings(); } else kerr.textContent = r.error; };
+  const voiceLine = h("div", { style: "margin-top:6px;font-size:12.5px;color:var(--muted)", text: (await api().voice_sample()).saved ? "A sample is saved." : "No sample yet. It is made after a meeting where only you speak on your microphone." });
   const audioOut = h("pre", { style: "margin:8px 0 0;font:12.5px/1.5 var(--font);white-space:pre-wrap;color:var(--ink)" }), checkBtn = h("button", { class: "btn", text: "Check audio" });
   checkBtn.onclick = async () => { checkBtn.disabled = true; audioOut.textContent = "Playing a short tone..."; const r = await api().check_audio(); checkBtn.disabled = false; audioOut.textContent = r.text; audioOut.style.color = r.ok ? "var(--ok)" : "var(--red)"; };
   setView(h("div", { class: "wrap" }, h("div", { class: "pagehead" }, hist.length ? backBtn() : null, h("div", {}, h("h1", { text: "Settings" }))),
@@ -472,6 +476,8 @@ async function renderSettings() {
       h("div", { class: "row" }, h("div", {}, h("b", { text: "Delete audio after (days)" }), h("small", { text: "The transcript and minutes stay. 0 keeps audio until you delete it." })), days),
       h("div", { class: "row" }, h("div", {}, h("b", { text: "OpenAI key" }), h("small", { text: st.key ? "A key is saved on this laptop, encrypted for your Windows account." : "Needed to transcribe and write minutes." })),
         h("div", { style: "text-align:right" }, h("div", { style: "display:flex;gap:8px" }, key, saveKey), kerr, st.key ? h("button", { class: "link danger", onclick: async () => { if (confirm("Forget the saved key on this laptop?")) { await api().forget_key(); renderSettings(); poll(); } }, text: "Forget the saved key" }) : null)),
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "My voice sample" }), h("small", { text: "Made by itself from your first meetings so your voice is always recognised, even with a colleague next to you. Kept only on this laptop." }), voiceLine),
+        h("button", { class: "btn", text: "Delete sample", onclick: async () => { await api().forget_voice(); renderSettings(); } })),
       h("div", { class: "row" }, h("div", {}, h("b", { text: "Check audio" }), h("small", { text: "Plays a short tone and checks that your microphone and the other side of a meeting can be heard." }), audioOut), checkBtn),
       h("div", { class: "row" }, h("div", {}, h("b", { text: "Where meetings are kept" }), h("small", { text: st.home })), h("button", { class: "btn", onclick: () => api().open_folder(""), text: "Open folder" }))),
     st.update && st.update.error ? h("div", { class: "banner warn", style: "margin-top:14px", text: "Updates: " + st.update.error }) : null,

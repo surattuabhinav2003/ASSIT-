@@ -13,7 +13,7 @@ import traceback
 
 import webview
 
-from . import __version__, audiotest, config, export, finish, names, paths, store, teams, updater
+from . import __version__, audiotest, voiceprint, config, export, finish, names, paths, store, teams, updater
 from . import secrets as keystore
 from .session import Session
 
@@ -226,6 +226,13 @@ class Api:
             return {"ok": False, "text": "Stop the recording first."}
         return audiotest.run()
 
+    def voice_sample(self):
+        return {"saved": voiceprint.exists()}
+
+    def forget_voice(self):
+        voiceprint.forget()
+        return True
+
     def forget_key(self):
         keystore.forget_key()
         self._app.client = None
@@ -244,6 +251,8 @@ class App:
         self.audio = AudioServer()
         self.api = Api(self)
         self._auto_started = False
+        self._auto_fails, self._auto_block_until = 0, 0.0      # automatic start that keeps failing: back off, then stop trying
+        self.problem = None
         self._manual_stop_during_call = False
         self._finishing = set()
         self._quit = threading.Event()
@@ -273,7 +282,7 @@ class App:
     def state(self):
         rec = bool(self.session and self.session.recording)
         busy = [m["id"] for m in store.listing() if m.get("status") == "processing"]
-        return {"version": __version__, "key": bool(config.api_key()), "recording": rec, "auto": self.settings["auto_start"], "language": self.settings.get("language", "en"),
+        return {"version": __version__, "key": bool(config.api_key()), "recording": rec, "problem": self.problem, "auto": self.settings["auto_start"], "language": self.settings.get("language", "en"),
                 "languages": config.LANGUAGES, "elapsed": round(time.time() - self.session.t0) if self.session and self.session.recording else 0,
                 "you": self.you_name(), "suggestion": self.suggestion, "processing": busy, "home": paths.HOME,
                 "meeting_id": self.session.mid if self.session else None,
@@ -348,6 +357,11 @@ class App:
             if self.session and m["id"] == self.session.mid:
                 continue
             if m.get("status") in ("recording", "processing") and m["id"] not in self._finishing:
+                tracks = sum(os.path.getsize(store.track_path(m["id"], w)) for w in ("you", "others") if os.path.isfile(store.track_path(m["id"], w)))
+                if tracks < 20000 and not store.lines(m["id"]):
+                    log(f"[app] dropping an empty recording {m['id']} (no audio, no words)")
+                    store.delete(m["id"])
+                    continue
                 if m.get("status") == "recording":
                     store.update(m["id"], ended=m.get("ended") or time.time())
                 log(f"[app] finishing an unfinished meeting {m['id']}")
@@ -369,10 +383,20 @@ class App:
                     in_call_for = 0
                     if out_for >= 3:
                         self._manual_stop_during_call = False
+                        self._auto_fails, self._auto_block_until, self.problem = 0, 0.0, None      # the call is over: a clean slate
                 if not rec and self.settings["auto_start"] and call and in_call_for >= 3 and not self._manual_stop_during_call \
-                        and config.api_key():
+                        and config.api_key() and time.time() >= self._auto_block_until and self._auto_fails < 5:
                     title = re.sub(r"\s*\|\s*Microsoft Teams\s*$", "", teams.meeting_title() or "", flags=re.I).strip()
-                    self.start_recording(title or "Teams meeting", "Teams")
+                    res = self.start_recording(title or "Teams meeting", "Teams")
+                    if not res.get("ok"):
+                        self._auto_fails += 1
+                        self._auto_block_until = time.time() + min(120, 10 * 2 ** (self._auto_fails - 1))     # 10 s, 20 s, 40 s, 80 s
+                        self.problem = {"text": res.get("error") or "Recording could not start.",
+                                        "gave_up": self._auto_fails >= 5}
+                        if self._auto_fails in (1, 5):
+                            self.notify("CF Minutes could not start recording", (res.get("error") or "")[:200] + " Open CF Minutes and press Record.")
+                    else:
+                        self._auto_fails, self.problem = 0, None
                 elif rec and self._auto_started and not call and not teams.meeting_open() and out_for >= 12:
                     self.stop_recording()                          # the call ended (about 25 s with no Teams call)
                 elif not rec and not call:

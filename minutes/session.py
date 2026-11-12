@@ -38,8 +38,13 @@ class Session:
         store.update(meta["id"], language=language)
         self.mid = meta["id"]
         self.capture = Capture(self.client, self._event, on_level=self._level)
-        self.capture.start(store.track_path(self.mid, "others") if keep_audio else None,
-                           store.track_path(self.mid, "you") if keep_audio else None)
+        try:
+            self.capture.start(store.track_path(self.mid, "others") if keep_audio else None,
+                               store.track_path(self.mid, "you") if keep_audio else None)
+        except Exception:
+            store.delete(self.mid)                       # a start that failed leaves no empty meeting behind
+            self.mid = None
+            raise
         self.t0 = self.capture.t0
         if app == "Teams":
             self.roster = names.TeamsRoster(self.t0, self.you_name)

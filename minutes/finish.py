@@ -140,10 +140,15 @@ def _data_url(x):
 def diarize(client, path, log=print, size_s=CHUNK_S):
     """[{"voice", "t0", "t1", "text"}] for the other side's track; voices are "V1", "V2"... in order of appearance."""
     x = normalised(read_wav(path))
-    if x is None:
-        return []
+    return [] if x is None else diarize_audio(client, x, log, size_s)
+
+
+def diarize_audio(client, x, log=print, size_s=CHUNK_S, known=None, prefix="V", do_merge=True):
+    """Speaker separation of 16 kHz audio. known: {name: data-URL of a short clip of that person}: their segments carry
+    that name. Other voices are prefix1, prefix2... in order of appearance. Long audio goes in pieces and the voices are
+    carried across the pieces with short reference clips."""
     pts = chunk_points(x, size_s)
-    voices, refs, out = {}, {}, []                         # raw label -> "V1"; "V1" -> reference clip
+    voices, refs, out = {}, dict(known or {}), []          # raw label -> "V1"; name/"V1" -> reference clip
     for i in range(len(pts) - 1):
         a, b = pts[i], pts[i + 1]
         piece = x[a:b]
@@ -156,11 +161,11 @@ def diarize(client, path, log=print, size_s=CHUNK_S):
         for attempt in range(3):
             try:
                 r = client.audio.transcriptions.create(
-                    model=config.DIARIZE_MODEL, file=("others.wav", to_wav_bytes(piece), "audio/wav"),
+                    model=config.DIARIZE_MODEL, file=("track.wav", to_wav_bytes(piece), "audio/wav"),
                     response_format="diarized_json", chunking_strategy="auto", **kw)
                 break
             except Exception as e:
-                log(f"[finish] diarize piece {i + 1}/{len(pts) - 1} failed ({type(e).__name__}), try {attempt + 1}")
+                log(f"[finish] speaker separation piece {i + 1}/{len(pts) - 1} failed ({type(e).__name__}), try {attempt + 1}")
                 if attempt == 1 and kw:
                     kw = {}                                   # the references were refused: carry on without them
                 time.sleep(2 + attempt * 3)
@@ -168,24 +173,99 @@ def diarize(client, path, log=print, size_s=CHUNK_S):
             raise RuntimeError("The transcription service did not answer for part of the meeting.")
         segs = r.model_dump().get("segments", []) if hasattr(r, "model_dump") else r.get("segments", [])
         best = {}                                             # voice -> longest segment, for a reference clip
-        for s in segs:
-            raw = str(s.get("speaker") or "?")
+        for sg in segs:
+            raw = str(sg.get("speaker") or "?")
             if raw in refs:
                 v = raw
             else:
-                v = voices.setdefault(raw if i == 0 else f"{i}:{raw}", f"V{len(voices) + 1}")
-            t0, t1 = a / RATE + float(s["start"]), a / RATE + float(s["end"])
-            text = (s.get("text") or "").strip()
+                v = voices.setdefault(raw if i == 0 else f"{i}:{raw}", f"{prefix}{len(voices) + 1}")
+            t0, t1 = a / RATE + float(sg["start"]), a / RATE + float(sg["end"])
+            text = (sg.get("text") or "").strip()
             if text:
                 out.append({"voice": v, "t0": round(t0, 2), "t1": round(t1, 2), "text": text})
             if t1 - t0 > best.get(v, (0, 0, 0))[0] and t1 - t0 >= 2.5:
-                best[v] = (t1 - t0, int(float(s["start"]) * RATE), int(float(s["end"]) * RATE))
+                best[v] = (t1 - t0, int(float(sg["start"]) * RATE), int(float(sg["end"]) * RATE))
         for v, (_, s0, s1) in best.items():                    # references for the next piece (up to 4 voices)
             if v not in refs and len(refs) < 4 and i + 1 < len(pts) - 1:
                 clip = piece[s0:min(s1, s0 + 10 * RATE)]
                 if len(clip) >= 2 * RATE:
                     refs[v] = _data_url(clip)
-    return merge(out)
+    return merge(out) if do_merge else out
+
+
+# ---------------------------------------------------------------- the microphone can hold several people
+def mic_spans(x, live_rows):
+    """(t0, t1) stretches of the microphone track where someone spoke: the live voice detector's, else found in the audio."""
+    spans = [(r["t0"], r["t1"]) for r in live_rows]
+    if spans:
+        return spans
+    frame = RATE // 2
+    n = len(x) // frame
+    if n == 0:
+        return []
+    env = np.abs(x[:n * frame].astype(np.int32)).reshape(n, frame).mean(axis=1)
+    loud = env > max(150.0, float(np.percentile(env, 90)) * 0.25)
+    out, start = [], None
+    for k, on in enumerate(loud):
+        if on and start is None:
+            start = k
+        elif not on and start is not None:
+            out.append((start * 0.5, k * 0.5))
+            start = None
+    if start is not None:
+        out.append((start * 0.5, n * 0.5))
+    return out
+
+
+def condense(x, spans, pad=0.3, gap=0.5):
+    """The microphone track with the silences cut out: only where someone spoke, padded, joined by short gaps.
+    Returns (audio, index) with index = [(start in the new audio, end, start in the original)] in samples."""
+    merged = []
+    for a, b in sorted(spans):
+        a, b = max(0.0, a - pad), min(len(x) / RATE, b + pad)
+        if merged and a <= merged[-1][1] + 0.4:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    pieces, index, pos = [], [], 0
+    silence = np.zeros(int(gap * RATE), dtype=np.int16)
+    for a, b in merged:
+        seg = x[int(a * RATE):int(b * RATE)]
+        if len(seg) < RATE * 0.3:
+            continue
+        pieces += [seg, silence]
+        index.append((pos, pos + len(seg), int(a * RATE)))
+        pos += len(seg) + len(silence)
+    return (np.concatenate(pieces) if pieces else np.zeros(0, dtype=np.int16)), index
+
+
+def real_time(index, t):
+    """A time in the condensed audio (seconds) -> a time in the meeting (seconds)."""
+    pos = int(t * RATE)
+    for c0, c1, r0 in index:
+        if pos < c1 + RATE // 2:
+            return (r0 + max(0, pos - c0)) / RATE
+    return t
+
+
+def mic_voices(client, path, live_rows, log=print, me_clip=None):
+    """The microphone track with speakers separated: {"segments": [{voice, t0, t1, text}], "audio": the track, "spans": spans},
+    or None when there is nothing to separate. A voice called "me" is the person whose voice sample was given."""
+    x = normalised(read_wav(path))
+    if x is None:
+        return None
+    spans = mic_spans(x, live_rows)
+    if sum(b - a for a, b in spans) < 2.0:
+        return None
+    cond, index = condense(x, spans)
+    if len(cond) < RATE * 2:
+        return None
+    segs = diarize_audio(client, cond, log, known={"me": me_clip} if me_clip else None, prefix="M", do_merge=False)
+    for sg in segs:
+        # back to meeting time FIRST: in the cut-down audio two turns twenty seconds apart touch each other
+        sg["t0"], sg["t1"] = round(real_time(index, sg["t0"]), 2), round(real_time(index, sg["t1"]), 2)
+        sg["t1"] = max(sg["t1"], sg["t0"] + 0.1)
+    return {"segments": merge(segs), "audio": x, "spans": spans}
 
 
 def merge(segs):
@@ -449,55 +529,125 @@ GENERIC_TITLES = ("meeting", "microsoft teams", "meeting now", "call")
 
 def run(client, mid, roster=None, you_name="", status=lambda s: None, log=print):
     """Reads what was recorded, writes the final transcript, the minutes and the meeting's status."""
+    from . import voiceprint
     meta = store.get(mid)
     live = store.lines(mid)
     others_p, you_p = store.track_path(mid, "others"), store.track_path(mid, "you")
     you_name = you_name or meta.get("you") or "You"
     roster_names = [n for n in (roster or {}).get("names", []) if n != you_name]
-    rows = []
     language = meta.get("language") or "en"
+    warnings = []
 
-    you_live = [r for r in live if r["side"] == "you" and r.get("text", "").strip()]
+    you_live = [r for r in live if r["side"] == "you" and r.get("text", "").strip() and not is_noise(r["text"], language)]
     status("Transcribing both sides")
     pool = cf.ThreadPoolExecutor(max_workers=2)
     f_others = pool.submit(diarize, client, others_p, log) if os.path.isfile(others_p) else None
-    f_you = (pool.submit(retranscribe, client, you_p, [(r["t0"], r["t1"]) for r in you_live], roster_names, log, language)
-             if os.path.isfile(you_p) and you_live else None)
+    f_mic = pool.submit(mic_voices, client, you_p, you_live, log, voiceprint.load()) if os.path.isfile(you_p) else None
+
+    # the other side
     voices = None
+    others_failed = False
     if f_others:
         try:
             voices = f_others.result()
         except Exception as e:
+            others_failed = True
             log(f"[finish] speaker separation failed ({type(e).__name__}: {e}); using the live transcript for the other side")
     if voices is None:
         voices = [{"voice": "V1", "t0": r["t0"], "t1": r["t1"], "text": r["text"]} for r in live if r["side"] == "them"]
         single = True
     else:
         single = False
-        if language != "en" and voices:
-            # The separation model writes Telugu in Latin letters ("Weeklow"): useful for WHO spoke WHEN, not as text.
-            # Each stretch is transcribed again with the better model, in the language of the meeting.
-            status("Transcribing Telugu")
+
+    # the microphone: you, and anyone else sitting at the same laptop
+    mic = None
+    if f_mic:
+        try:
+            mic = f_mic.result()
+        except Exception as e:
+            log(f"[finish] speaker separation on the microphone failed ({type(e).__name__}: {e}); using the live words")
+    pool.shutdown(wait=False)
+    mic_segs = mic["segments"] if mic else []
+    mic_time = {}
+    for sg in mic_segs:
+        mic_time[sg["voice"]] = mic_time.get(sg["voice"], 0.0) + (sg["t1"] - sg["t0"])
+    me = None
+    if mic_time:
+        if "me" in mic_time:
+            me = "me"
+        elif not voiceprint.exists():
+            me = max(mic_time, key=mic_time.get)          # no sample yet: the voice that spoke most on your microphone
+    if mic and len(mic_time) == 1 and not voiceprint.exists():
+        who = next(iter(mic_time))
+        try:
+            if voiceprint.maybe_enrol(mic["audio"], [(g["t0"], g["t1"]) for g in mic_segs if g["voice"] == who],
+                                      [(v["t0"], v["t1"]) for v in voices]):
+                log("[finish] saved your voice sample")
+        except Exception as e:
+            log(f"[finish] voice sample not saved ({type(e).__name__})")
+
+    # Telugu and mixed: the separation text is not usable, so each stretch is transcribed again in the language spoken
+    if language != "en":
+        status("Transcribing Telugu")
+        if not single and voices:
             again = retranscribe(client, others_p, [(v["t0"], v["t1"]) for v in voices], roster_names, log, language, min_s=0.4)
             voices = [dict(v, text=again[i]) for i, v in enumerate(voices) if i in again]
+        if mic_segs:
+            again = retranscribe(client, you_p, [(g["t0"], g["t1"]) for g in mic_segs], roster_names, log, language, min_s=0.4)
+            mic_segs = [dict(g, text=again[i]) for i, g in enumerate(mic_segs) if i in again]
+
     by_voice = {}
     for v in voices:
         by_voice.setdefault(v["voice"], []).append(v)
-
-    # your side
-    you_text = f_you.result() if f_you else {}
-    pool.shutdown(wait=False)
-    for i, r in enumerate(you_live):
-        rows.append({"side": "you", "speaker": you_name, "t0": r["t0"], "t1": r["t1"], "text": you_text.get(i) or r["text"]})
+    room = {}                                              # other people heard on this microphone
+    for g in mic_segs:
+        if g["voice"] != me:
+            room.setdefault(g["voice"], []).append(g)
 
     # names
     status("Matching voices to names")
-    named, conf = ({}, {}) if single else name_voices(client, by_voice, roster, you_name, meta.get("title", ""), log)
-    order = {v: i + 1 for i, v in enumerate(by_voice)}
+    pool_voices = dict(by_voice)
+    pool_voices.update(room)
+    named, conf = ({}, {}) if (single and not room) else name_voices(client, pool_voices, roster, you_name, meta.get("title", ""), log)
+    order = {v: i + 1 for i, v in enumerate(pool_voices)}
+    rows = []
+    if mic_segs:
+        for g in mic_segs:
+            if g["voice"] == me:
+                rows.append({"side": "you", "speaker": you_name, "t0": g["t0"], "t1": g["t1"], "text": g["text"]})
+            else:
+                rows.append({"side": "you", "speaker": named.get(g["voice"]) or f"Speaker {order[g['voice']]}",
+                             "t0": g["t0"], "t1": g["t1"], "text": g["text"]})
+    else:
+        for r in you_live:
+            rows.append({"side": "you", "speaker": you_name, "t0": r["t0"], "t1": r["t1"], "text": r["text"]})
     for v in voices:
         label = named.get(v["voice"]) or (f"Speaker {order[v['voice']]}" if not single else "Others")
         rows.append({"side": "them", "speaker": label, "t0": v["t0"], "t1": v["t1"], "text": v["text"]})
+
+    # what to tell the person about how reliable the names are
+    remote_time = sum(v["t1"] - v["t0"] for v in voices)
+    if not single and len(by_voice) == 1 and len(roster_names) >= 2 and remote_time >= 45:
+        warnings.append(f"Teams shows {len(roster_names) + 1} people, but only one voice could be told apart on the other side. "
+                        "Check who said what, and rename if needed.")
+    if others_failed:
+        warnings.append("The other side could not be separated into speakers this time (the transcription service did not answer). "
+                        "The recording is kept: use Transcribe again at the bottom of this page.")
+    elif os.path.isfile(others_p) and meta.get("app") == "Teams" and not single and not voices and (meta.get("ended") or 0) - (meta.get("started") or 0) > 60:
+        warnings.append("The other side's audio was silent for this whole meeting. Run Settings, Check audio, and make sure "
+                        "the meeting plays through the Windows default speaker.")
+
     rows = [r for r in rows if r["text"].strip() and not is_noise(r["text"], language)]
+    # people in the room with you: voices on your microphone that really said something (a stray fragment is not a person)
+    heard = {}
+    for r in rows:
+        if r["side"] == "you" and r["speaker"] != you_name:
+            heard[r["speaker"]] = heard.get(r["speaker"], 0.0) + (r["t1"] - r["t0"])
+    in_room = [n for n, secs in heard.items() if secs >= 3.0]
+    if in_room:
+        warnings.append(f"{len(in_room)} more {'voice was' if len(in_room) == 1 else 'voices were'} heard on your microphone "
+                        "(people in the room with you).")
+    rows = [r for r in rows if not (r["side"] == "you" and r["speaker"] != you_name and r["speaker"] not in in_room)]
     rows.sort(key=lambda r: (r["t0"], r["t1"]))
     for i, r in enumerate(rows):
         r["id"] = i + 1
@@ -517,7 +667,8 @@ def run(client, mid, roster=None, you_name="", status=lambda s: None, log=print)
     title = meta.get("title") or ""
     if not title or title.lower().replace(" | microsoft teams", "").strip() in GENERIC_TITLES:
         title = mom.get("title") or title
-    store.update(mid, status="ready", attendees=attendees, title=title or "Meeting", error="")
+    store.update(mid, status="ready", attendees=attendees, title=title or "Meeting", error="", warnings=warnings,
+                 voices={"other_side": len(by_voice), "room": len(in_room)})
     return rows, mom
 
 

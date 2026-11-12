@@ -106,9 +106,26 @@ class Listener:
             self._frames.put((self.last_audio, in_data))
             return (None, pyaudio.paContinue)
 
-        self._stream = pa.open(format=pyaudio.paInt16, channels=self.channels, rate=self.rate, input=True,
-                               input_device_index=device["index"],
-                               frames_per_buffer=int(self.rate * FRAME_MS / 1000), stream_callback=callback)
+        # Windows can refuse the format PortAudio reported (a call changes the device's format: a headset in call mode is
+        # 16 kHz mono): try the others, and say exactly what was tried.
+        ch0, rate0 = self.channels, self.rate
+        tried, last = [], None
+        for ch, rate in dict.fromkeys([(ch0, rate0), (2, rate0), (1, rate0), (ch0, 48000), (ch0, 44100), (1, 16000), (2, 16000)]):
+            try:
+                self._stream = pa.open(format=pyaudio.paInt16, channels=ch, rate=rate, input=True,
+                                       input_device_index=device["index"],
+                                       frames_per_buffer=int(rate * FRAME_MS / 1000), stream_callback=callback)
+                self.channels, self.rate = ch, rate
+                break
+            except OSError as e:
+                last = e
+                tried.append(f"{ch}ch/{rate}Hz")
+        else:
+            print(f"[capture] could not open {device['name']!r} (index {device['index']}, reported {ch0}ch/{rate0}Hz); tried "
+                  f"{', '.join(tried)}: {last}")
+            raise last
+        if tried:
+            print(f"[capture] {device['name']!r} opened as {self.channels}ch/{self.rate}Hz after {', '.join(tried)} failed")
         threading.Thread(target=self._loop, daemon=True, name=f"listen-{device['name'][:12]}").start()
 
     def stop(self):
@@ -223,7 +240,7 @@ class Capture:
         from .stream import StreamSide
         self.events = events
         self.on_level = on_level or (lambda side, v: None)
-        self.pa = pyaudio.PyAudio()
+        self.pa = None                      # opened in start(): a failed start must not leave Windows' device list stale
         self.t0 = None
         self._line_start = {}
         self.writers = {}
@@ -254,54 +271,111 @@ class Capture:
             on_start=started, on_end=ended)
 
     def _loopback(self):
-        """The loopback of the default speaker. Windows sometimes cannot name the default output for a moment (a dock or
-        headset connecting): ask again with a fresh device list, then take any speaker loopback there is."""
+        """The loopback of the default speaker, or of any speaker when Windows cannot name the default one."""
+        try:
+            return self.pa.get_default_wasapi_loopback()
+        except Exception as e:
+            found = list(self.pa.get_loopback_device_info_generator())
+            if found:
+                print(f"[capture] default speaker not available ({e}); using {found[0]['name']}")
+                return found[0]
+            raise
+
+    def _open_speakers(self):
+        """The default speaker's loopback first, then every other loopback Windows lists (Teams may play to another output)."""
+        devices = []
+        try:
+            devices.append(self._loopback())
+        except Exception as e:
+            print(f"[capture] no default speaker loopback: {type(e).__name__}: {e}")
+        try:
+            for d in self.pa.get_loopback_device_info_generator():
+                if not any(d["index"] == x["index"] for x in devices):
+                    devices.append(d)
+        except Exception:
+            pass
+        last = None
+        for dev in devices:
+            try:
+                return Listener(self.pa, dev, sink=self.sides["them"], agc=True, silence_ms=700,
+                                tap=(lambda x, now: self.writers["others"].add(x, now)) if "others" in self.writers else None,
+                                on_level=lambda v: self._heard("them", v))
+            except Exception as e:
+                last = e
+        raise last or RuntimeError("no speaker loopback was found")
+
+    def _cleanup(self):
+        """Everything this attempt opened is closed, and PortAudio is shut down so the next attempt reads Windows' devices
+        afresh. (A start that failed used to leave it open: the device list then stayed stale for the whole run, and
+        every later start failed with "Invalid device".)"""
+        for l in list(self.listeners.values()):
+            l.stop()
+        self.listeners = {}
+        for s in list(self.sides.values()):
+            try:
+                s.stop()
+            except Exception:
+                pass
+        self.sides = {}
+        for w in list(self.writers.values()):
+            w.close()
+        self.writers = {}
+        try:
+            if self.pa is not None:
+                self.pa.terminate()
+        except Exception:
+            pass
+        self.pa = None
+
+    def start(self, others_path=None, you_path=None):
         last = None
         for attempt in range(3):
             try:
-                return self.pa.get_default_wasapi_loopback()
+                self._open(others_path, you_path, strict=attempt < 2)
+                return
             except Exception as e:
                 last = e
-                try:
-                    found = list(self.pa.get_loopback_device_info_generator())
-                    if found:
-                        print(f"[capture] default speaker not available ({e}); using {found[0]['name']}")
-                        return found[0]
-                except Exception as e2:
-                    last = e2
-                time.sleep(1.0)
-                try:
-                    self.pa.terminate()
-                except Exception:
-                    pass
-                self.pa = pyaudio.PyAudio()                          # re-reads the device list
-        raise RuntimeError("No speaker output was found to record the other side. Check the sound output in Windows "
-                           "(Settings, System, Sound) and try again.") from last
+                print(f"[capture] start attempt {attempt + 1} failed: {type(e).__name__}: {e}")
+                self._cleanup()
+                time.sleep(1.0 + attempt)
+        raise RuntimeError("Could not open the speakers and microphone ("
+                           f"{type(last).__name__}). Another app may be using the audio device, or it changed. "
+                           "Wait a few seconds and try again, or run Settings, Check audio.") from last
 
-    def start(self, others_path=None, you_path=None):
+    def _open(self, others_path, you_path, strict):
+        """strict: a speaker or microphone that cannot be opened fails the attempt (so it is tried again); the last
+        attempt accepts what works, and says what is missing."""
+        self.pa = pyaudio.PyAudio()
         self.t0 = time.time()
-        loop_dev = self._loopback()
         wasapi = self.pa.get_host_api_info_by_type(pyaudio.paWASAPI)
         if others_path:
             self.writers["others"] = TrackWriter(others_path, self.t0)
         if you_path:
             self.writers["you"] = TrackWriter(you_path, self.t0)
         self.sides = {"them": self._side("them"), "you": self._side("you")}
-        self.listeners["them"] = Listener(
-            self.pa, loop_dev, sink=self.sides["them"], agc=True, silence_ms=700,
-            tap=(lambda x, now: self.writers["others"].add(x, now)) if "others" in self.writers else None,
-            on_level=lambda v: self._heard("them", v))
+        try:
+            self.listeners["them"] = self._open_speakers()
+        except Exception as e:
+            if strict:
+                raise
+            print(f"[capture] no speaker loopback: {type(e).__name__}: {e}")
+            self.events("error", "them", None, "The speakers could not be recorded, so only your microphone is recorded. "
+                        "Run Settings, Check audio.", None)
         try:
             mic = self.pa.get_device_info_by_index(wasapi["defaultInputDevice"])
             self.listeners["you"] = Listener(
                 self.pa, mic, sink=self.sides["you"], silence_ms=600,
                 tap=(lambda x, now: self.writers["you"].add(x, now)) if "you" in self.writers else None,
                 # with speakers (no headset) the mic also hears the other side: that is not you
-                keep=lambda a, b: self.listeners["them"].speaking_during(a, b) <= 0.5,
+                keep=lambda a, b: ("them" not in self.listeners) or self.listeners["them"].speaking_during(a, b) <= 0.5,
                 on_level=lambda v: self._heard("you", v))
         except Exception as e:
-            print(f"[capture] no microphone: {e}")
+            if strict:
+                raise
+            print(f"[capture] no microphone: {type(e).__name__}: {e}")
             self.events("error", "you", None, "No microphone found: only the other side is recorded.", None)
+        if not self.listeners:
+            raise RuntimeError("no audio device could be opened")
 
     def _heard(self, side, v):
         self.max_level[side] = max(self.max_level.get(side, 0.0), v)
@@ -320,14 +394,16 @@ class Capture:
         for l in self.listeners.values():
             l.stop()
         time.sleep(0.4)
-        for s in self.sides.values():
+        for side in self.sides.values():
             try:
-                s.stop()
+                side.stop()
             except Exception:
                 pass
         for w in self.writers.values():
             w.close()
         try:
-            self.pa.terminate()
+            if self.pa is not None:
+                self.pa.terminate()
         except Exception:
             pass
+        self.pa = None
