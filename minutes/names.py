@@ -1,0 +1,147 @@
+"""Who is in the meeting, from what Teams shows on screen (Windows UI Automation: the same tree a screen reader
+reads). Nothing is installed into Teams and nothing leaves this laptop.
+
+Each second the meeting window is read for participant tiles / roster rows: Teams labels them like
+"Priya Shah, Unmuted, Video on". From those labels this keeps
+  - the roster: every name seen in the meeting
+  - a timeline: when someone was speaking, or the only person unmuted. That is evidence for finish.py
+    when it decides which diarized voice is which person.
+A person is never named from this alone: finish.py also uses the words spoken ("Thanks, Priya") and you
+can rename anyone on screen.
+
+The label format is Teams'; tools/dump_teams.py writes what Teams exposes during a real meeting, to tune the
+patterns below if Teams changes."""
+import ctypes
+import re
+import threading
+import time
+
+from . import teams
+
+# words after the name in a tile's label
+_STATE = re.compile(r"\b(un-?muted|muted|speaking|video (?:on|off)|camera (?:on|off)|presenting|sharing|raised hand|"
+                    r"hand raised|pinned|spotlighted|organizer|presenter|attendee|host)\b", re.I)
+_NOT_NAMES = {"mute", "unmute", "camera", "share", "react", "more", "leave", "chat", "people", "raise", "rooms",
+              "apps", "view", "notes", "whiteboard", "captions", "record", "transcript", "back", "forward", "search",
+              "settings and more", "calendar", "calls", "activity", "teams", "files", "meeting", "close", "minimize",
+              "maximize", "restore"}
+_PERSON = re.compile(r"^[^\W\d_][^\W\d_'.\-() ]*(?:[ '.\-]+[^\W\d_'.\-() ]+){0,4}\.?(?: \((?:You|Guest|External)\))?$", re.UNICODE)
+
+
+def display_name():
+    """The Windows account's display name ("Abhinav Surattu"), or ""."""
+    try:
+        buf = ctypes.create_unicode_buffer(256)
+        size = ctypes.c_ulong(256)
+        if ctypes.windll.secur32.GetUserNameExW(3, buf, ctypes.byref(size)):       # NameDisplay
+            return buf.value.strip()
+    except Exception:
+        pass
+    return ""
+
+
+def parse_label(label):
+    """"Priya Shah, Unmuted, Video on" -> {"name", "speaking", "unmuted", "muted", "you"}; None when it is not
+    a participant label."""
+    label = (label or "").strip()
+    if not label or len(label) > 220:
+        return None
+    parts = [p.strip() for p in label.split(",") if p.strip()]
+    if len(parts) < 2:
+        return None
+    name, rest = parts[0], ", ".join(parts[1:])
+    if not _STATE.search(rest) or name.lower() in _NOT_NAMES or not _PERSON.match(name):
+        return None
+    low = rest.lower()
+    you = bool(re.search(r"\(you\)", name, re.I))
+    name = re.sub(r"\s*\((?:you|guest|external)\)", "", name, flags=re.I).strip()
+    return {"name": name, "you": you,
+            "speaking": bool(re.search(r"(?<!not )\bspeaking\b", low)),
+            "unmuted": bool(re.search(r"\bun-?muted\b", low)),
+            "muted": bool(re.search(r"(?<!un)(?<!un-)\bmuted\b", low))}
+
+
+class TeamsRoster:
+    """Polls the Teams meeting window while a meeting is recorded."""
+
+    def __init__(self, t0, you_name=""):
+        self.t0, self.you_name = t0, you_name
+        self.names = {}                  # name -> times seen
+        self.timeline = []               # {"t", "speaking": [...], "unmuted": [...]} when something changed
+        self.reads = 0
+        self.ok = False                  # True once a participant tile was read
+        self._last = None
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        threading.Thread(target=self._run, daemon=True, name="teams-roster").start()
+
+    def stop(self):
+        self._stop.set()
+
+    def snapshot(self):
+        with self._lock:
+            return {"names": [n for n, c in sorted(self.names.items(), key=lambda kv: -kv[1])],
+                    "timeline": list(self.timeline), "reads": self.reads, "ok": self.ok}
+
+    # ---- UI Automation ----
+    def _setup(self):
+        import comtypes
+        import comtypes.client
+        comtypes.CoInitialize()
+        comtypes.client.GetModule("UIAutomationCore.dll")
+        from comtypes.gen import UIAutomationClient as U
+        uia = comtypes.CoCreateInstance(U.CUIAutomation._reg_clsid_, interface=U.IUIAutomation,
+                                        clsctx=comtypes.CLSCTX_INPROC_SERVER)
+        cache = uia.CreateCacheRequest()
+        cache.AddProperty(U.UIA_NamePropertyId)
+        return U, uia, cache
+
+    def _labels(self, U, uia, cache, hwnd):
+        root = uia.ElementFromHandle(hwnd)
+        arr = root.FindAllBuildCache(U.TreeScope_Descendants, uia.CreateTrueCondition(), cache)
+        return [arr.GetElement(i).CachedName or "" for i in range(arr.Length)]
+
+    def _run(self):
+        try:
+            U, uia, cache = self._setup()
+        except Exception as e:
+            print(f"[names] UI Automation is not available ({type(e).__name__}); names come from the voices only")
+            return
+        while not self._stop.wait(1.0):
+            try:
+                w = teams.teams_window()
+                if not w or w["kind"] == "main" or w.get("minimized"):
+                    continue
+                people = [p for p in (parse_label(x) for x in self._labels(U, uia, cache, w["hwnd"])) if p]
+            except Exception as e:
+                print(f"[names] read failed: {type(e).__name__}: {e}")
+                continue
+            now = round(time.time() - self.t0, 1)
+            with self._lock:
+                self.reads += 1
+                if people:
+                    self.ok = True
+                for p in people:
+                    if not p["you"] and p["name"] != self.you_name:
+                        self.names[p["name"]] = self.names.get(p["name"], 0) + 1
+                state = (tuple(sorted(p["name"] for p in people if p["speaking"])),
+                         tuple(sorted(p["name"] for p in people if p["unmuted"] and not p["you"])))
+                if state != self._last:
+                    self._last = state
+                    self.timeline.append({"t": now, "speaking": list(state[0]), "unmuted": list(state[1])})
+
+
+def dump_tree(path):
+    """Writes every labelled element of the Teams meeting window to a text file (for tuning parse_label)."""
+    r = TeamsRoster.__new__(TeamsRoster)
+    U, uia, cache = r._setup()
+    w = teams.teams_window()
+    if not w:
+        return "No Teams window found."
+    labels = r._labels(U, uia, cache, w["hwnd"])
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(f"window: {w['title']!r} kind={w['kind']}\n")
+        for x in labels:
+            if x.strip():
+                f.write(f"{'PERSON ' if parse_label(x) else '       '}{x[:200]!r}\n")
+    return f"{len(labels)} elements, window {w['title']!r}, written to {path}"

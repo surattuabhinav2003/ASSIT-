@@ -1,0 +1,100 @@
+{
+ "keywords": [
+  "Box",
+  "CloudFuze",
+  "cutover",
+  "delta",
+  "Dropbox",
+  "Egnyte",
+  "Gmail",
+  "Google Chat",
+  "Google Drive",
+  "My Drive",
+  "OneDrive",
+  "Outlook",
+  "Shared Drive",
+  "ShareFile",
+  "SharePoint",
+  "Slack",
+  "Teams",
+  "tenant",
+  "WorkDocs"
+ ],
+ "speech_corrections": [
+  [
+   "\\b(?:cloud\\s*fu[sz]e|crowd\\s*fee|cloud\\s*views?)\\b",
+   "CloudFuze"
+  ],
+  [
+   "\\b(?:egg?\\s*night|egnight|egnite|ignite|eg\\s*nite|agnite)\\b(?=[^.?!]{0,40}\\b(?:drive|migrat|move|moving|onedrive|sharepoint|google|box|dropbox|files?)\\b)",
+   "Egnyte"
+  ],
+  [
+   "\\b(?:share\\s*file|shape\\s*file|share\\s*fail|chair\\s*file)\\b",
+   "ShareFile"
+  ],
+  [
+   "\\b(to|from|into)\\s+(?:egg?\\s*night|egnight|egnite|ignite|eg\\s*nite)\\b",
+   "\\1 Egnyte"
+  ],
+  [
+   "\\bdrop\\s*box\\b",
+   "Dropbox"
+  ],
+  [
+   "\\bg\\s*mail\\b",
+   "Gmail"
+  ],
+  [
+   "\\bg\\s*suite\\b",
+   "G Suite"
+  ],
+  [
+   "\\bmira\\b(?=[^.?!]{0,30}\\b(?:mural|board|whiteboard)\\b)",
+   "Miro"
+  ],
+  [
+   "\\bmy\\s*drive\\b",
+   "My Drive"
+  ],
+  [
+   "\\bone\\s*drive\\b",
+   "OneDrive"
+  ],
+  [
+   "\\bout\\s*look\\b",
+   "Outlook"
+  ],
+  [
+   "\\bshare\\s*point\\b",
+   "SharePoint"
+  ],
+  [
+   "\\bwork\\s*docs\\b",
+   "WorkDocs"
+  ]
+ ],
+ "products": [
+  "Azure Blob",
+  "Box",
+  "Dropbox",
+  "Egnyte",
+  "File server",
+  "Gmail",
+  "Google Chat",
+  "Google My Drive",
+  "Google Shared Drive",
+  "Lucid",
+  "Miro",
+  "Mural",
+  "OneDrive",
+  "Outlook",
+  "ShareFile",
+  "SharePoint",
+  "Slack",
+  "Teams",
+  "WorkDocs",
+  "Workplace"
+ ],
+ "note": "Exported from the CloudFuze Assist reference tables (read-only). Product names the transcription is told to expect, and fixes for names speech-to-text mishears."
+}

@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CF Minutes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --blue: #0129AC; --blue-2: #0B57E0; --blue-soft: #E8EEFC; --ink: #0E1A33; --text: #25324D; --muted: #5E6B85; --faint: #8A95AB;
+    --bg: #F4F7FB; --card: #FFFFFF; --line: #DCE3EF; --line-2: #C9D3E4;
+    --red: #C62828; --red-soft: #FDECEC; --ok: #17794A; --ok-soft: #E6F4EC; --warn: #9A5B00; --warn-soft: #FFF3DC;
+    --font: "Poppins", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --ease: cubic-bezier(.2, .8, .2, 1);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 400 14px/1.55 var(--font); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased; overflow: hidden; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--blue-2); outline-offset: 2px; }
+  h1, h2, h3 { margin: 0; color: var(--ink); font-weight: 600; letter-spacing: -.01em; }
+  .muted { color: var(--muted); } .faint { color: var(--faint); }
+
+  #app { display: grid; grid-template-columns: 290px 1fr; height: 100vh; }
+  aside { display: flex; flex-direction: column; min-height: 0; background: var(--card); border-right: 1px solid var(--line); }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 18px 18px 12px; font-weight: 600; color: var(--ink); font-size: 15px; }
+  .mark { width: 30px; height: 30px; border-radius: 8px; background: var(--blue); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+  .rec-btn { margin: 4px 16px 12px; height: 42px; border-radius: 9px; border: 0; background: var(--blue); color: #fff; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 9px; transition: background .15s; }
+  .rec-btn:hover { background: #0a35c4; }
+  .rec-btn.stop { background: var(--red); } .rec-btn.stop:hover { background: #a91f1f; }
+  .rec-btn .dot { width: 10px; height: 10px; border-radius: 50%; background: #fff; }
+  .rec-btn.stop .dot { border-radius: 2px; }
+  .search { margin: 0 16px 8px; position: relative; }
+  .search input { width: 100%; height: 36px; border: 1px solid var(--line-2); border-radius: 8px; padding: 0 10px 0 32px; font: inherit; background: var(--bg); color: var(--ink); }
+  .search svg { position: absolute; left: 10px; top: 10px; width: 16px; height: 16px; color: var(--faint); }
+  #list { flex: 1; overflow-y: auto; padding: 4px 8px 12px; min-height: 0; }
+  .day { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); padding: 12px 10px 5px; }
+  .item { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 9px 10px; border-radius: 8px; border-left: 3px solid transparent; }
+  .item:hover { background: var(--bg); } .item.on { background: var(--blue-soft); border-left-color: var(--blue); }
+  .item b { display: block; font-weight: 500; color: var(--ink); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item > span { display: block; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tagline { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: 1px; }
+  .tagline.busy { background: var(--warn-soft); color: var(--warn); } .tagline.err { background: var(--red-soft); color: var(--red); } .tagline.rec { background: var(--red-soft); color: var(--red); }
+  .side-foot { border-top: 1px solid var(--line); padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .link { background: none; border: 0; color: var(--blue); font-weight: 500; padding: 4px 6px; border-radius: 6px; } .link:hover { background: var(--blue-soft); }
+  .link.danger { color: var(--red); } .link.danger:hover { background: var(--red-soft); }
+
+  main { overflow-y: auto; min-width: 0; position: relative; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 28px 34px 120px; }
+  .banner { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 9px; margin-bottom: 14px; font-size: 13px; }
+  .banner.warn { background: var(--warn-soft); color: var(--warn); } .banner.info { background: var(--blue-soft); color: var(--blue); } .banner.bad { background: var(--red-soft); color: var(--red); }
+  .banner .grow { flex: 1; }
+  .btn { height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--card); font-weight: 500; color: var(--ink); display: inline-flex; align-items: center; gap: 7px; }
+  .btn:hover { background: var(--bg); } .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; } .btn.primary:hover { background: #0a35c4; }
+  .btn svg { width: 15px; height: 15px; } .btn:disabled { opacity: .5; cursor: default; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; }
+
+  /* home */
+  .hero { padding: 30px 0 10px; } .hero h1 { font-size: 28px; line-height: 1.2; max-width: 620px; }
+  .hero p { max-width: 600px; color: var(--muted); font-size: 15px; margin: 10px 0 20px; }
+  .how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 26px; }
+  .how .card h3 { font-size: 14px; margin-bottom: 4px; } .how .card p { margin: 0; font-size: 13px; color: var(--muted); }
+  .status-row { display: flex; align-items: center; gap: 9px; margin-top: 22px; font-size: 13px; color: var(--muted); }
+  .led { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); } .led.off { background: var(--line-2); }
+
+  /* live */
+  .live-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .live-head h2 { font-size: 20px; } .timer { font-variant-numeric: tabular-nums; font-size: 20px; font-weight: 500; color: var(--red); }
+  .pulse { width: 12px; height: 12px; border-radius: 50%; background: var(--red); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(198, 40, 40, .5); } 70% { box-shadow: 0 0 0 10px rgba(198, 40, 40, 0); } 100% { box-shadow: 0 0 0 0 rgba(198, 40, 40, 0); } }
+  .meters { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
+  .meter { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; font-size: 12.5px; }
+  .meter .bar { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; } .meter .bar i { display: block; height: 100%; width: 0; background: var(--blue-2); transition: width .12s linear; }
+  .meter b { font-weight: 500; color: var(--ink); min-width: 52px; }
+  .stream { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 6px 0; min-height: 280px; max-height: calc(100vh - 330px); overflow-y: auto; }
+  .consent { margin-top: 12px; font-size: 12px; color: var(--faint); }
+
+  /* transcript lines */
+  .ln { display: grid; grid-template-columns: 52px 128px 1fr; gap: 10px; padding: 8px 16px; align-items: baseline; border-left: 3px solid transparent; }
+  .ln:hover { background: #FAFBFE; } .ln.now { background: var(--blue-soft); border-left-color: var(--blue); }
+  .ln .tm { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; background: none; border: 0; padding: 0; text-align: left; } .ln .tm:hover { color: var(--blue); }
+  .ln .who { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; padding: 0; text-align: left; } .ln .who:hover { text-decoration: underline; }
+  .ln .tx { color: var(--ink); } .ln.partial .tx { color: var(--faint); font-style: italic; }
+  .empty { padding: 40px; text-align: center; color: var(--faint); }
+
+  /* meeting */
+  .mhead input.title { width: 100%; border: 0; border-bottom: 2px solid transparent; background: none; font: 600 26px/1.25 var(--font); color: var(--ink); padding: 2px 0; letter-spacing: -.01em; }
+  .mhead input.title:hover { border-bottom-color: var(--line); } .mhead input.title:focus { border-bottom-color: var(--blue); outline: none; }
+  .mmeta { color: var(--muted); font-size: 13px; margin: 4px 0 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 16px; }
+  .chip { border: 1px solid var(--line-2); background: var(--card); border-radius: 7px; padding: 3px 10px; font-size: 12.5px; color: var(--ink); display: inline-flex; align-items: center; gap: 7px; }
+  .chip i { width: 8px; height: 8px; border-radius: 50%; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 18px; }
+  .tab { background: none; border: 0; padding: 9px 14px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; } .tab.on { color: var(--blue); border-bottom-color: var(--blue); }
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .sec { margin-bottom: 22px; } .sec h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--blue); margin-bottom: 8px; }
+  .sec ul { margin: 0; padding-left: 20px; } .sec li { margin: 5px 0; color: var(--ink); }
+  table.act { width: 100%; border-collapse: collapse; font-size: 13.5px; } table.act th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 6px 10px; border-bottom: 1px solid var(--line-2); }
+  table.act td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--ink); } table.act td:first-child { font-weight: 500; white-space: nowrap; }
+  textarea.ed, input.ed { width: 100%; border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; font: inherit; color: var(--ink); background: var(--card); resize: vertical; }
+  .steps { margin: 18px 0 0; padding: 0; list-style: none; } .steps li { display: flex; align-items: center; gap: 10px; padding: 7px 0; color: var(--faint); } .steps li.done { color: var(--ok); } .steps li.cur { color: var(--ink); font-weight: 500; }
+  .spin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--blue); animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
+  .find { display: flex; gap: 10px; margin-bottom: 12px; } .find input, .find select { height: 36px; border: 1px solid var(--line-2); border-radius: 8px; padding: 0 10px; font: inherit; background: var(--card); color: var(--ink); } .find input { flex: 1; }
+  .foot-actions { margin-top: 28px; display: flex; gap: 6px; flex-wrap: wrap; border-top: 1px solid var(--line); padding-top: 12px; }
+
+  /* player */
+  #player { position: sticky; bottom: 0; background: var(--card); border-top: 1px solid var(--line); padding: 10px 34px; display: none; align-items: center; gap: 14px; }
+  #player.on { display: flex; } #player input[type=range] { flex: 1; accent-color: var(--blue); } #player .t { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 92px; text-align: right; }
+  .play { width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--blue); color: #fff; display: grid; place-items: center; } .play svg { width: 16px; height: 16px; }
+
+  /* settings */
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 0; border-bottom: 1px solid var(--line); } .row:last-child { border-bottom: 0; }
+  .row b { font-weight: 500; color: var(--ink); display: block; } .row small { color: var(--muted); font-size: 12.5px; }
+  .row input[type=text], .row input[type=password], .row input[type=number], .row select { height: 36px; border: 1px solid var(--line-2); border-radius: 8px; padding: 0 10px; font: inherit; min-width: 220px; }
+  .switch { width: 42px; height: 24px; border-radius: 12px; border: 0; background: var(--line-2); position: relative; flex: none; } .switch::after { content: ""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: transform .15s; }
+  .switch.on { background: var(--blue); } .switch.on::after { transform: translateX(18px); }
+  .err-text { color: var(--red); font-size: 13px; margin-top: 8px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div class="brand"><span class="mark">CF</span>CF Minutes</div>
+    <button class="rec-btn" id="recBtn"><span class="dot"></span><span id="recLabel">Record a meeting</span></button>
+    <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" placeholder="Search meetings" autocomplete="off"></div>
+    <div id="list"></div>
+    <div class="side-foot"><span id="who"></span><button class="link" id="settingsBtn">Settings</button></div>
+  </aside>
+  <main id="main"><div id="view"></div><div id="player"></div></main>
+</div>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else if (k === "text") e.textContent = v; else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null && k !== false) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+}
+const ICON = {
+  copy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>',
+  down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0l-4-4m4 4l4-4M5 20h14"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>', pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>',
+};
+const icon = (n) => { const s = document.createElement("span"); s.innerHTML = ICON[n]; return s.firstChild; };   // fixed markup above, never user text
+const PALETTE = ["#0129AC", "#0B7A75", "#B45309", "#475569", "#1D6FA5", "#9A3412", "#166534", "#7C5A00"];
+const _seen = {};
+const colorOf = (n) => { if (!(n in _seen)) _seen[n] = PALETTE[Object.keys(_seen).length % PALETTE.length]; return _seen[n]; };   // first seen, first colour
+const stamp = (s) => { s = Math.max(0, Math.floor(s || 0)); const m = Math.floor(s / 60), r = s % 60; return s >= 3600 ? `${Math.floor(s / 3600)}:${String(m % 60).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`; };
+const api = () => window.pywebview.api;
+
+let S = { recording: false, key: true }, meetings = [], current = null, view = "home", liveTimer = null, tab = "minutes", openMeeting = null, editing = false, filterQ = "";
+
+// ---------------------------------------------------------------- sidebar
+function dayLabel(t) {
+  const d = new Date(t * 1000), n = new Date(), y = new Date(Date.now() - 864e5);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  return same(d, n) ? "Today" : same(d, y) ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+}
+function renderList() {
+  const box = $("#list"); box.replaceChildren();
+  const q = filterQ.toLowerCase();
+  const rows = meetings.filter((m) => !q || `${m.title} ${(m.attendees || []).join(" ")} ${m.preview || ""}`.toLowerCase().includes(q));
+  if (!rows.length) { box.append(h("div", { class: "empty", text: meetings.length ? "No meeting matches." : "Meetings you record appear here." })); return; }
+  let last = "";
+  for (const m of rows) {
+    const d = dayLabel(m.started);
+    if (d !== last) { box.append(h("div", { class: "day", text: d })); last = d; }
+    const time = new Date(m.started * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    const tag = m.status === "recording" ? h("span", { class: "tagline rec", text: "Recording" }) : m.status === "processing" ? h("span", { class: "tagline busy", text: "Writing" }) : m.status === "error" ? h("span", { class: "tagline err", text: "Needs attention" }) : null;
+    box.append(h("button", { class: "item" + (openMeeting === m.id && view === "meeting" ? " on" : ""), onclick: () => showMeeting(m.id) },
+      h("b", {}, m.title || "Meeting", tag), h("span", { text: `${time}${m.attendees && m.attendees.length ? " · " + m.attendees.slice(0, 3).join(", ") : ""}` })));
+  }
+}
+async function refreshList() { try { meetings = await api().meetings(); } catch (e) { return; } renderList(); }
+
+function renderRec() {
+  const b = $("#recBtn"); b.classList.toggle("stop", !!S.recording);
+  $("#recLabel").textContent = S.recording ? "Stop recording" : "Record a meeting";
+  $("#who").textContent = S.you || "";
+}
+$("#recBtn").onclick = async () => {
+  if (S.recording) { const r = await api().stop(); if (r && r.id) showMeeting(r.id); }
+  else { const r = await api().start(""); if (r && !r.ok) alert(r.error); else showLive(); }
+  await poll();
+};
+$("#q").oninput = (e) => { filterQ = e.target.value; renderList(); };
+$("#settingsBtn").onclick = () => showSettings();
+
+// ---------------------------------------------------------------- views
+function setView(name, node) { view = name; $("#view").replaceChildren(node); $("#main").scrollTop = 0; stopLivePolling(); if (name !== "meeting") hidePlayer(); renderList(); }
+
+function showHome() {
+  const keyBanner = !S.key ? h("div", { class: "banner warn" }, h("span", { class: "grow", text: "Add your OpenAI key so CF Minutes can transcribe." }), h("button", { class: "btn", onclick: showSettings, text: "Add key" })) : null;
+  const sug = S.suggestion ? h("div", { class: "banner info" }, h("span", { class: "grow", text: `${S.suggestion.app} is using your microphone. Is this a meeting you want to record?` }),
+    h("button", { class: "btn primary", onclick: () => $("#recBtn").click(), text: "Record it" }), h("button", { class: "btn", onclick: async () => { await api().dismiss_suggestion(); poll(); }, text: "Not now" })) : null;
+  setView("home", h("div", { class: "wrap" }, keyBanner, sug,
+    h("div", { class: "hero" }, h("h1", { text: "Every meeting, written down with names and minutes." }),
+      h("p", { text: "CF Minutes hears you and everyone else on the call, from Teams or any other app, keeps the transcript with who said what, and writes short minutes with decisions and action items. It all stays on this laptop." }),
+      h("button", { class: "btn primary", onclick: () => $("#recBtn").click() }, "Record a meeting")),
+    h("div", { class: "how" },
+      h("div", { class: "card" }, h("h3", { text: "Starts by itself in Teams" }), h("p", { text: "When a Teams meeting begins it starts listening, and stops when the meeting ends. For Zoom, Meet or anything else, press Record." })),
+      h("div", { class: "card" }, h("h3", { text: "Both sides, with names" }), h("p", { text: "Your microphone and the sound the laptop plays are kept as two tracks. Other people are named from the Teams roster and what is said." })),
+      h("div", { class: "card" }, h("h3", { text: "Minutes in a minute" }), h("p", { text: "A short summary, decisions, and action items with owners. Edit them, copy them, or save as Word." }))),
+    h("div", { class: "status-row" }, h("span", { class: "led" + (S.auto ? "" : " off") }), S.auto ? "Listening for Teams meetings" : "Automatic start is off (Settings)")));
+}
+
+// ---- live
+function showLive() {
+  const timer = h("span", { class: "timer", text: "00:00" });
+  const barY = h("i"), barO = h("i");
+  const stream = h("div", { class: "stream" });
+  const notes = h("div"), roster = h("div", { class: "muted", style: "font-size:12.5px;margin-bottom:10px" });
+  const stopBtn = h("button", { class: "btn primary", onclick: () => $("#recBtn").click() }, "Stop and write the minutes");
+  setView("live", h("div", { class: "wrap" },
+    h("div", { class: "live-head" }, h("span", { class: "pulse" }), h("h2", { text: "Recording" }), timer, h("span", { class: "grow", style: "flex:1" }), stopBtn),
+    notes,
+    h("div", { class: "meters" }, h("div", { class: "meter" }, h("b", { text: "You" }), h("span", { class: "bar" }, barY)), h("div", { class: "meter" }, h("b", { text: "Others" }), h("span", { class: "bar" }, barO))),
+    roster, stream,
+    h("div", { class: "consent", text: "Tell everyone on the call that you are recording. The audio and transcript are kept only on this laptop." })));
+  let pinned = true;
+  stream.addEventListener("scroll", () => { pinned = stream.scrollTop + stream.clientHeight >= stream.scrollHeight - 30; });
+  const tick = async () => {
+    let L; try { L = await api().live(); } catch (e) { return; }
+    if (!L.recording) { stopLivePolling(); const id = L.id || S.meeting_id; if (id) showMeeting(id); else showHome(); return; }
+    timer.textContent = stamp(L.elapsed); barY.style.width = Math.round((L.levels.you || 0) * 100) + "%"; barO.style.width = Math.round((L.levels.them || 0) * 100) + "%";
+    roster.textContent = L.roster.length ? "Teams shows: " + L.roster.join(", ") : "";
+    notes.replaceChildren(...(L.notices || []).map((n) => h("div", { class: "banner warn", text: n })), L.mic_stale ? h("div", { class: "banner warn", text: "Your microphone is not sending sound. Check it in Windows sound settings." }) : "");
+    stream.replaceChildren(...L.rows.map((r) => lineNode(r, true)));
+    for (const side of ["you", "them"]) if (L.partial[side]) stream.append(lineNode({ t0: L.elapsed, speaker: side === "you" ? S.you : (L.roster.length === 1 ? L.roster[0] : "Others"), text: L.partial[side] }, true, true));
+    if (!L.rows.length && !L.partial.you && !L.partial.them) stream.append(h("div", { class: "empty", text: "Listening. Words appear here as people speak." }));
+    if (pinned) stream.scrollTop = stream.scrollHeight;
+  };
+  tick(); liveTimer = setInterval(tick, 800);
+}
+function stopLivePolling() { if (liveTimer) { clearInterval(liveTimer); liveTimer = null; } }
+function lineNode(r, live, partial) {
+  const who = h("button", { class: "who", style: `color:${colorOf(r.speaker)}`, title: live ? "" : "Click to rename this person everywhere", text: r.speaker });
+  if (!live) who.onclick = () => renameSpeaker(r.speaker);
+  const tm = h("button", { class: "tm", text: stamp(r.t0), title: live ? "" : "Play from here" });
+  if (!live) tm.onclick = () => seek(r.t0);
+  return h("div", { class: "ln" + (partial ? " partial" : ""), "data-t0": r.t0, "data-t1": r.t1 }, tm, who, h("span", { class: "tx", text: r.text }));
+}
+
+// ---- a meeting
+async function showMeeting(mid) {
+  openMeeting = mid; editing = false; stopLivePolling();
+  const data = await api().meeting(mid);
+  if (!data) { showHome(); return; }
+  current = data; renderMeeting(); renderList();
+}
+function renderMeeting() {
+  const { meta, lines, mom } = current;
+  const mins = Math.max(1, Math.round(((meta.ended || meta.started) - meta.started) / 60));
+  const when = new Date(meta.started * 1000).toLocaleString(undefined, { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+  const title = h("input", { class: "title", value: meta.title || "Meeting", "aria-label": "Meeting title" });
+  title.onchange = async () => { await api().set_title(meta.id, title.value); refreshList(); };
+  const chips = h("div", { class: "chips" }, ...(meta.attendees || []).map((n) => h("button", { class: "chip", title: "Rename", onclick: () => renameSpeaker(n) }, h("i", { style: `background:${colorOf(n)}` }), n)));
+  const head = h("div", { class: "mhead" }, title, h("div", { class: "mmeta", text: `${when} · ${mins} min${meta.app ? " · " + meta.app : ""}` }), chips);
+  const body = h("div");
+  const node = h("div", { class: "wrap" }, head);
+  if (meta.status === "processing" || meta.status === "recording") { node.append(processingNode(meta)); setView("meeting", node); pollProcessing(meta.id); return; }
+  if (meta.status === "error") node.append(h("div", { class: "banner bad" }, h("span", { class: "grow", text: `Something went wrong writing this meeting: ${meta.error || "unknown error"}. The recording is safe.` }), h("button", { class: "btn", onclick: async () => { await api().reprocess(meta.id); showMeeting(meta.id); }, text: "Try again" })));
+  node.append(h("div", { class: "tabs" }, ...[["minutes", "Minutes"], ["transcript", "Transcript"]].map(([k, l]) => h("button", { class: "tab" + (tab === k ? " on" : ""), onclick: () => { tab = k; editing = false; renderMeeting(); } }, l))));
+  node.append(body);
+  if (tab === "minutes") renderMinutes(body, meta, mom); else renderTranscript(body, lines);
+  node.append(h("div", { class: "foot-actions" },
+    h("button", { class: "link", onclick: () => api().open_folder(meta.id), text: "Open folder" }),
+    meta.has_you_audio || meta.has_others_audio ? h("button", { class: "link danger", onclick: async () => { if (confirm("Delete the audio of this meeting? The transcript and minutes stay.")) { await api().delete_audio(meta.id); showMeeting(meta.id); } }, text: "Delete audio" }) : null,
+    h("button", { class: "link", onclick: async () => { if (confirm("Transcribe this meeting again from the saved audio?")) { await api().reprocess(meta.id); showMeeting(meta.id); } }, text: "Transcribe again" }),
+    h("button", { class: "link danger", onclick: async () => { if (confirm("Delete this meeting, its transcript, minutes and audio?")) { await api().delete(meta.id); openMeeting = null; await refreshList(); showHome(); } }, text: "Delete meeting" })));
+  setView("meeting", node);
+  setupPlayer(current);
+}
+function processingNode(meta) {
+  const steps = ["Transcribing both sides", "Matching voices to names", "Checking names and product terms", "Writing the minutes"];
+  const ul = h("ul", { class: "steps" }); ul.id = "steps";
+  return h("div", { class: "card" }, h("h3", { text: meta.status === "recording" ? "This recording was interrupted. Finishing it now." : "Writing the transcript and minutes" }), h("p", { class: "muted", text: "This usually takes a minute or two. You can leave this page." }), ul);
+}
+async function pollProcessing(mid) {
+  const steps = ["Transcribing both sides", "Matching voices to names", "Checking names and product terms", "Writing the minutes"];
+  const tick = async () => {
+    if (openMeeting !== mid || view !== "meeting") return;
+    let L = {}; try { L = await api().live(); } catch (e) {}
+    const ul = $("#steps"); if (!ul) return;
+    const at = steps.indexOf(L.status);
+    ul.replaceChildren(...steps.map((s, i) => h("li", { class: i < at ? "done" : i === at ? "cur" : "" }, i === at ? h("span", { class: "spin" }) : h("span", { text: i < at ? "✓" : "·", style: "width:14px;text-align:center" }), s)));
+    const m = (await api().meetings()).find((x) => x.id === mid);
+    if (m && m.status !== "processing" && m.status !== "recording") { await refreshList(); showMeeting(mid); return; }
+    setTimeout(tick, 1500);
+  };
+  tick();
+}
+function section(title, items) {
+  return h("div", { class: "sec" }, h("h3", { text: title }), items.length ? h("ul", {}, ...items.map((x) => h("li", { text: x }))) : h("div", { class: "faint", text: "None." }));
+}
+function renderMinutes(body, meta, mom) {
+  if (!mom) { body.append(h("div", { class: "empty", text: "No minutes yet." })); return; }
+  const tools = h("div", { class: "tools" },
+    h("button", { class: "btn", onclick: async () => { await navigator.clipboard.writeText(await api().copy_text(meta.id, "minutes")); toast("Minutes copied"); } }, icon("copy"), "Copy"),
+    h("button", { class: "btn", onclick: async () => { const p = await api().export(meta.id, "docx"); if (p) toast("Saved"); } }, icon("down"), "Word"),
+    h("button", { class: "btn", onclick: async () => { const p = await api().export(meta.id, "md"); if (p) toast("Saved"); } }, icon("down"), "Markdown"),
+    h("button", { class: "btn", onclick: () => { editing = true; renderMeeting(); } }, icon("edit"), "Edit"),
+    h("button", { class: "btn", onclick: async () => { if (confirm("Write the minutes again from the transcript? Your edits to them will be replaced.")) { await api().regenerate(meta.id); showMeeting(meta.id); } } }, icon("redo"), "Write again"));
+  if (editing) { renderMinutesEditor(body, meta, mom); return; }
+  body.append(tools, section("Summary", mom.summary || []), section("Decisions", mom.decisions || []));
+  const acts = mom.actions || [];
+  body.append(h("div", { class: "sec" }, h("h3", { text: "Action items" }), acts.length ? h("table", { class: "act" }, h("thead", {}, h("tr", {}, h("th", { text: "Owner" }), h("th", { text: "Action" }), h("th", { text: "Due" }))),
+    h("tbody", {}, ...acts.map((a) => h("tr", {}, h("td", { text: a.owner }), h("td", { text: a.task }), h("td", { text: a.due || "" }))))) : h("div", { class: "faint", text: "None." })));
+  body.append(section("Open questions", mom.open_questions || []));
+}
+function renderMinutesEditor(body, meta, mom) {
+  const ta = (items) => h("textarea", { class: "ed", rows: Math.max(3, (items || []).length + 1) }, (items || []).join("\n"));
+  const sum = ta(mom.summary), dec = ta(mom.decisions), oq = ta(mom.open_questions);
+  const rowsBox = h("div"); const acts = (mom.actions || []).map((a) => ({ ...a }));
+  const drawActs = () => { rowsBox.replaceChildren(...acts.map((a, i) => h("div", { style: "display:grid;grid-template-columns:160px 1fr 140px 40px;gap:8px;margin-bottom:8px" },
+    inp(a, "owner", "Owner"), inp(a, "task", "Action"), inp(a, "due", "Due"), h("button", { class: "link danger", onclick: () => { acts.splice(i, 1); drawActs(); }, "aria-label": "Remove", text: "×" })))); };
+  const inp = (o, k, ph) => { const e = h("input", { class: "ed", value: o[k] || "", placeholder: ph }); e.oninput = () => { o[k] = e.value; }; return e; };
+  drawActs();
+  const lines = (t) => t.value.split("\n").map((x) => x.trim()).filter(Boolean);
+  body.append(h("div", { class: "sec" }, h("h3", { text: "Summary (one point per line)" }), sum), h("div", { class: "sec" }, h("h3", { text: "Decisions" }), dec),
+    h("div", { class: "sec" }, h("h3", { text: "Action items" }), rowsBox, h("button", { class: "btn", onclick: () => { acts.push({ owner: "", task: "", due: "" }); drawActs(); }, text: "Add an action" })),
+    h("div", { class: "sec" }, h("h3", { text: "Open questions" }), oq),
+    h("div", { class: "tools" }, h("button", { class: "btn primary", onclick: async () => { await api().save_mom(meta.id, { summary: lines(sum), decisions: lines(dec), open_questions: lines(oq), actions: acts }); editing = false; showMeeting(meta.id); } }, "Save"),
+      h("button", { class: "btn", onclick: () => { editing = false; renderMeeting(); } }, "Cancel")));
+}
+function renderTranscript(body, lines) {
+  const speakers = [...new Set(lines.map((l) => l.speaker))];
+  const q = h("input", { placeholder: "Search the transcript" });
+  const sel = h("select", {}, h("option", { value: "", text: "Everyone" }), ...speakers.map((s) => h("option", { value: s, text: s })));
+  const box = h("div", { class: "stream", style: "max-height:none" });
+  const draw = () => {
+    const t = q.value.toLowerCase(), sp = sel.value;
+    const rows = lines.filter((l) => (!sp || l.speaker === sp) && (!t || l.text.toLowerCase().includes(t) || l.speaker.toLowerCase().includes(t)));
+    box.replaceChildren(...(rows.length ? rows.map((r) => lineNode(r, false)) : [h("div", { class: "empty", text: lines.length ? "No line matches." : "Nothing was transcribed." })]));
+  };
+  q.oninput = draw; sel.onchange = draw; draw();
+  body.append(h("div", { class: "tools" },
+    h("button", { class: "btn", onclick: async () => { await navigator.clipboard.writeText(await api().copy_text(current.meta.id, "transcript")); toast("Transcript copied"); } }, icon("copy"), "Copy transcript")),
+    h("div", { class: "find" }, q, sel), box);
+}
+async function renameSpeaker(old) {
+  const cur = old;
+  const name = prompt(`Who is "${cur}"? This renames them everywhere in this meeting.`, /^(Speaker \d+|Others)$/.test(cur) ? "" : cur);
+  if (name && name.trim() && name.trim() !== cur) { await api().rename_speaker(current.meta.id, cur, name.trim()); showMeeting(current.meta.id); refreshList(); }
+}
+
+// ---- player: both tracks together, on the meeting's clock
+let P = null;
+function hidePlayer() { const p = $("#player"); p.classList.remove("on"); p.replaceChildren(); if (P) { P.a.forEach((x) => x.pause()); P = null; } }
+function setupPlayer(data) {
+  const el = $("#player"); el.replaceChildren(); el.classList.remove("on"); if (P) { P.a.forEach((x) => x.pause()); P = null; }
+  const urls = Object.values(data.audio || {}); if (!urls.length) return;
+  const a = urls.map((u) => { const x = new Audio(u); x.preload = "metadata"; return x; });
+  const dur = () => Math.max(...a.map((x) => x.duration || 0), 0);
+  const btn = h("button", { class: "play", "aria-label": "Play" }), range = h("input", { type: "range", min: 0, max: 1000, value: 0, "aria-label": "Position" }), t = h("span", { class: "t", text: "00:00 / 00:00" });
+  const setIcon = (playing) => { btn.replaceChildren(icon(playing ? "pause" : "play")); };
+  setIcon(false);
+  btn.onclick = () => { if (a[0].paused) { a.forEach((x) => { x.currentTime = a[0].currentTime; x.play(); }); setIcon(true); } else { a.forEach((x) => x.pause()); setIcon(false); } };
+  range.oninput = () => { const s = (range.value / 1000) * dur(); a.forEach((x) => { x.currentTime = s; }); };
+  a[0].ontimeupdate = () => { const d = dur() || 1; range.value = Math.round((a[0].currentTime / d) * 1000); t.textContent = `${stamp(a[0].currentTime)} / ${stamp(d)}`; markNow(a[0].currentTime); };
+  a[0].onended = () => setIcon(false);
+  el.append(btn, range, t, h("span", { class: "muted", style: "font-size:12px", text: urls.length > 1 ? "You and others" : "" })); el.classList.add("on");
+  P = { a, setIcon };
+}
+function seek(s) { if (!P) return; P.a.forEach((x) => { x.currentTime = Math.max(0, s - 0.5); x.play(); }); P.setIcon(true); }
+function markNow(t) { document.querySelectorAll(".ln").forEach((n) => n.classList.toggle("now", t >= +n.dataset.t0 && t <= +n.dataset.t1 + 0.2)); }
+
+// ---- settings
+async function showSettings() {
+  const cfg = await api().settings(); const st = await api().state();
+  const sw = (key) => { const b = h("button", { class: "switch" + (cfg[key] ? " on" : ""), role: "switch", "aria-checked": String(!!cfg[key]) }); b.onclick = async () => { cfg[key] = !cfg[key]; b.classList.toggle("on", cfg[key]); b.setAttribute("aria-checked", String(cfg[key])); await api().set_settings({ [key]: cfg[key] }); poll(); }; return b; };
+  const name = h("input", { type: "text", value: cfg.your_name || "", placeholder: st.you }); name.onchange = () => api().set_settings({ your_name: name.value.trim() }).then(poll);
+  const days = h("input", { type: "number", min: 0, max: 365, value: cfg.audio_days }); days.onchange = () => api().set_settings({ audio_days: Math.max(0, +days.value || 0) });
+  const key = h("input", { type: "password", placeholder: "sk-...", autocomplete: "off" }); const kerr = h("div", { class: "err-text" });
+  const saveKey = h("button", { class: "btn primary", text: "Save key" });
+  saveKey.onclick = async () => { kerr.textContent = ""; saveKey.disabled = true; const r = await api().set_key(key.value); saveKey.disabled = false; if (r.ok) { key.value = ""; toast("Key saved"); await poll(); showSettings(); } else kerr.textContent = r.error; };
+  setView("settings", h("div", { class: "wrap" }, h("h1", { style: "font-size:24px;margin-bottom:16px", text: "Settings" }),
+    h("div", { class: "card" },
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "Start recording by itself in Teams" }), h("small", { text: "Begins when a Teams meeting starts, stops when it ends. Other apps are only suggested." })), sw("auto_start")),
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "Your name in transcripts" }), h("small", { text: "Shown for your own lines. Empty uses the Windows account name." })), name),
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "Keep audio for (days)" }), h("small", { text: "Older audio is deleted. The transcript and minutes stay. 0 keeps audio until you delete it." })), days),
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "OpenAI key" }), h("small", { text: st.key ? "A key is saved on this laptop, encrypted for your Windows account." : "Needed to transcribe and write minutes." })),
+        h("div", { style: "text-align:right" }, h("div", { style: "display:flex;gap:8px" }, key, saveKey), kerr, st.key ? h("button", { class: "link danger", onclick: async () => { if (confirm("Forget the saved key on this laptop?")) { await api().forget_key(); showSettings(); poll(); } }, text: "Forget the saved key" }) : null)),
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "Where meetings are kept" }), h("small", { text: st.home })), h("button", { class: "btn", onclick: () => api().open_folder(""), text: "Open folder" }))),
+    st.update && st.update.error ? h("div", { class: "banner warn", style: "margin-top:14px", text: `Updates: ${st.update.error}` }) : null,
+    h("p", { class: "muted", style: "font-size:12.5px;margin-top:14px", text: `CF Minutes ${st.version}${st.update && st.update.version ? " (" + st.update.version + ")" : ""}. Recordings, transcripts and minutes stay on this laptop. Audio and text are sent to OpenAI only to be transcribed and summarised.` })));
+}
+
+function toast(msg) { const t = h("div", { style: "position:fixed;left:50%;bottom:78px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:8px;font-size:13px;z-index:9" , text: msg }); document.body.append(t); setTimeout(() => t.remove(), 1800); }
+
+// ---------------------------------------------------------------- polling
+let lastRec = null;
+async function poll() {
+  try { S = await api().state(); } catch (e) { return; }
+  renderRec();
+  if (S.recording && view !== "live") showLive();
+  if (lastRec === true && !S.recording && view === "live") { /* live view moves on by itself */ }
+  if (view === "home") showHome();
+  lastRec = S.recording;
+}
+async function boot() {
+  await poll(); await refreshList(); if (view === "home" || !view) showHome();
+  setInterval(poll, 3000); setInterval(refreshList, 6000);
+}
+window.addEventListener("pywebviewready", boot);
+if (window.pywebview && window.pywebview.api) boot();
+</script>
+</body>
+</html>
