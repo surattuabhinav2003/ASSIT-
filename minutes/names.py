@@ -19,7 +19,8 @@ import time
 from . import teams
 
 # words after the name in a tile's label
-_STATE = re.compile(r"\b(un-?muted|muted|speaking|video (?:on|off)|camera (?:on|off)|presenting|sharing|raised hand|"
+_STATE = re.compile(r"\b(un-?muted|muted|speaking|video (?:on|off)|video is (?:on|off)|camera (?:on|off)|context menu is available|"
+                    r"presenting|sharing|raised hand|"
                     r"hand raised|pinned|spotlighted|organizer|presenter|attendee|host)\b", re.I)
 _SAMPLE = re.compile(r"mute|speak|video|camera|present|host|organi[sz]er|attendee|hand|pinned|participant|joined|\(you\)", re.I)
 _NOT_NAMES = {"mute", "unmute", "camera", "share", "react", "more", "leave", "chat", "people", "raise", "rooms",
@@ -47,6 +48,9 @@ def parse_label(label):
     label = (label or "").strip()
     if not label or len(label) > 220:
         return None
+    me = re.match(r"^Myself video,\s*(.+)$", label, re.I)            # your own tile: "Myself video, Abhinav Surattu"
+    if me:
+        return {"name": me.group(1).strip(), "you": True, "speaking": False, "unmuted": False, "muted": False}
     parts = [p.strip() for p in label.split(",") if p.strip()]
     if len(parts) < 2:
         return None

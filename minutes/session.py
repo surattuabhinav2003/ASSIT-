@@ -46,7 +46,7 @@ class Session:
             self.mid = None
             raise
         self.t0 = self.capture.t0
-        if app == "Teams":
+        if True:                      # it only reads while a Teams meeting window is open: harmless for any other app
             self.roster = names.TeamsRoster(self.t0, self.you_name, dump_path=store.track_path(self.mid, "x").replace("x.wav", "teams_labels.txt"))
         self.recording = True
         threading.Thread(target=self._autosave, daemon=True, name="autosave").start()
