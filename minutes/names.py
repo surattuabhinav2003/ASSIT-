@@ -21,6 +21,7 @@ from . import teams
 # words after the name in a tile's label
 _STATE = re.compile(r"\b(un-?muted|muted|speaking|video (?:on|off)|camera (?:on|off)|presenting|sharing|raised hand|"
                     r"hand raised|pinned|spotlighted|organizer|presenter|attendee|host)\b", re.I)
+_SAMPLE = re.compile(r"mute|speak|video|camera|present|host|organi[sz]er|attendee|hand|pinned|participant|joined|\(you\)", re.I)
 _NOT_NAMES = {"mute", "unmute", "camera", "share", "react", "more", "leave", "chat", "people", "raise", "rooms",
               "apps", "view", "notes", "whiteboard", "captions", "record", "transcript", "back", "forward", "search",
               "settings and more", "calendar", "calls", "activity", "teams", "files", "meeting", "close", "minimize",
@@ -69,6 +70,7 @@ class TeamsRoster:
         self.names = {}                  # name -> times seen
         self.timeline = []               # {"t", "speaking": [...], "unmuted": [...]} when something changed
         self.reads = 0
+        self.samples = []                # labels that look like participant tiles (read or not): for tuning parse_label
         self.ok = False                  # True once a participant tile was read
         self._last = None
         self._stop = threading.Event()
@@ -81,7 +83,7 @@ class TeamsRoster:
     def snapshot(self):
         with self._lock:
             return {"names": [n for n, c in sorted(self.names.items(), key=lambda kv: -kv[1])],
-                    "timeline": list(self.timeline), "reads": self.reads, "ok": self.ok}
+                    "timeline": list(self.timeline), "reads": self.reads, "ok": self.ok, "samples": list(self.samples)}
 
     # ---- UI Automation ----
     def _setup(self):
@@ -112,7 +114,13 @@ class TeamsRoster:
                 w = teams.teams_window()
                 if not w or w["kind"] == "main" or w.get("minimized"):
                     continue
-                people = [p for p in (parse_label(x) for x in self._labels(U, uia, cache, w["hwnd"])) if p]
+                labels = self._labels(U, uia, cache, w["hwnd"])
+                people = [p for p in (parse_label(x) for x in labels) if p]
+                with self._lock:
+                    for x in labels:
+                        x = x.strip()
+                        if x and len(x) <= 160 and x not in self.samples and len(self.samples) < 80 and _SAMPLE.search(x):
+                            self.samples.append(x)
             except Exception as e:
                 print(f"[names] read failed: {type(e).__name__}: {e}")
                 continue
