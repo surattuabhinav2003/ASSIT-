@@ -13,7 +13,7 @@ import traceback
 
 import webview
 
-from . import __version__, config, export, finish, names, paths, store, teams, updater
+from . import __version__, audiotest, config, export, finish, names, paths, store, teams, updater
 from . import secrets as keystore
 from .session import Session
 
@@ -209,6 +209,13 @@ class Api:
         self._app.client = None
         self._app.resume_unfinished()
         return {"ok": True}
+
+    def check_audio(self):
+        """Plays a short tone to the default speaker and listens to it through the same capture the meetings use
+        (loopback), and listens to the microphone. Says which side is not working."""
+        if self.session and self.session.recording:
+            return {"ok": False, "text": "Stop the recording first."}
+        return audiotest.run()
 
     def forget_key(self):
         keystore.forget_key()

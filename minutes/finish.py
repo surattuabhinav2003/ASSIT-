@@ -192,14 +192,20 @@ def merge(segs):
 
 # ---------------------------------------------------------------- 2. your side
 def hint(names):
+    """A short list of names and terms, no sentences: the model must not be able to read it back as speech."""
     v = vocab()
-    bits = []
-    if names:
-        bits.append("People in this meeting: " + ", ".join(names) + ".")
-    terms = list(dict.fromkeys(v["keywords"] + v["products"]))
-    if terms:
-        bits.append("Terms that may come up: " + ", ".join(terms) + ".")
-    return " ".join(bits)[:900]
+    words = list(dict.fromkeys([*names, *v["keywords"], *v["products"]]))
+    return ", ".join(words)[:500]
+
+
+def _norm(t):
+    return re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).strip()
+
+
+def _echoes_hint(text, prompt):
+    """True when the transcription is just the hint read back (it does that on near-silence): never a real line."""
+    t, p = _norm(text), _norm(prompt)
+    return bool(t) and (t in p or (len(t.split()) <= 12 and all(w in p.split() for w in t.split())))
 
 
 def retranscribe(client, path, spans, names, log=print):
@@ -209,6 +215,8 @@ def retranscribe(client, path, spans, names, log=print):
 
     def one(i):
         t0, t1 = spans[i]
+        if t1 - t0 < 0.9:
+            return i, None                                 # too short to be worth a second look: the live text stays
         a, b = max(0, int((t0 - 0.25) * RATE)), min(len(x), int((t1 + 0.4) * RATE))
         piece = normalised(x[a:b])
         if piece is None or len(piece) < RATE * 0.4:
@@ -217,7 +225,8 @@ def retranscribe(client, path, spans, names, log=print):
             try:
                 r = client.audio.transcriptions.create(model="gpt-4o-transcribe", language="en", prompt=prompt,
                                                        file=("you.wav", to_wav_bytes(piece), "audio/wav"))
-                return i, (r.text or "").strip()
+                text = (r.text or "").strip()
+                return i, (None if _echoes_hint(text, prompt) else text)
             except Exception as e:
                 log(f"[finish] re-transcribing your speech failed ({type(e).__name__})")
                 time.sleep(1.5)

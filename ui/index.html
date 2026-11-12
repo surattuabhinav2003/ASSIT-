@@ -382,6 +382,9 @@ async function showSettings() {
   const key = h("input", { type: "password", placeholder: "sk-...", autocomplete: "off" }); const kerr = h("div", { class: "err-text" });
   const saveKey = h("button", { class: "btn primary", text: "Save key" });
   saveKey.onclick = async () => { kerr.textContent = ""; saveKey.disabled = true; const r = await api().set_key(key.value); saveKey.disabled = false; if (r.ok) { key.value = ""; toast("Key saved"); await poll(); showSettings(); } else kerr.textContent = r.error; };
+  const audioOut = h("pre", { style: "margin:8px 0 0;font:12.5px/1.5 var(--font);white-space:pre-wrap;color:var(--ink)" });
+  const checkBtn = h("button", { class: "btn", text: "Check audio" });
+  checkBtn.onclick = async () => { checkBtn.disabled = true; audioOut.textContent = "Playing a short tone..."; const r = await api().check_audio(); checkBtn.disabled = false; audioOut.textContent = r.text; audioOut.style.color = r.ok ? "var(--ok)" : "var(--red)"; };
   setView("settings", h("div", { class: "wrap" }, h("h1", { style: "font-size:24px;margin-bottom:16px", text: "Settings" }),
     h("div", { class: "card" },
       h("div", { class: "row" }, h("div", {}, h("b", { text: "Start recording by itself in Teams" }), h("small", { text: "Begins when a Teams meeting starts, stops when it ends. Other apps are only suggested." })), sw("auto_start")),
@@ -389,6 +392,7 @@ async function showSettings() {
       h("div", { class: "row" }, h("div", {}, h("b", { text: "Keep audio for (days)" }), h("small", { text: "Older audio is deleted. The transcript and minutes stay. 0 keeps audio until you delete it." })), days),
       h("div", { class: "row" }, h("div", {}, h("b", { text: "OpenAI key" }), h("small", { text: st.key ? "A key is saved on this laptop, encrypted for your Windows account." : "Needed to transcribe and write minutes." })),
         h("div", { style: "text-align:right" }, h("div", { style: "display:flex;gap:8px" }, key, saveKey), kerr, st.key ? h("button", { class: "link danger", onclick: async () => { if (confirm("Forget the saved key on this laptop?")) { await api().forget_key(); showSettings(); poll(); } }, text: "Forget the saved key" }) : null)),
+      h("div", { class: "row" }, h("div", {}, h("b", { text: "Check audio" }), h("small", { text: "Plays a short tone and checks that your microphone and the other side of a meeting can be heard." }), audioOut), checkBtn),
       h("div", { class: "row" }, h("div", {}, h("b", { text: "Where meetings are kept" }), h("small", { text: st.home })), h("button", { class: "btn", onclick: () => api().open_folder(""), text: "Open folder" }))),
     st.update && st.update.error ? h("div", { class: "banner warn", style: "margin-top:14px", text: `Updates: ${st.update.error}` }) : null,
     h("p", { class: "muted", style: "font-size:12.5px;margin-top:14px", text: `CF Minutes ${st.version}${st.update && st.update.version ? " (" + st.update.version + ")" : ""}. Recordings, transcripts and minutes stay on this laptop. Audio and text are sent to OpenAI only to be transcribed and summarised.` })));

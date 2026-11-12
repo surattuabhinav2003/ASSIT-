@@ -97,8 +97,13 @@ class Session:
         with self._lock:
             rows = list(self.rows[-400:])
         r = self.roster.snapshot() if self.roster else None
+        notices = list(self.notices)
+        elapsed = time.time() - self.t0 if self.t0 else 0
+        if self.recording and elapsed > 45 and self.capture and self.capture.max_level["them"] < 0.01:
+            notices.append("No sound from the other side yet. If you are in a meeting, check that it plays through the Windows "
+                           "default speaker (Settings, Check audio).")
         return {"recording": self.recording, "id": self.mid, "elapsed": round(time.time() - self.t0, 1) if self.t0 and self.recording else 0,
-                "rows": rows, "partial": dict(self.partial), "levels": dict(self.levels), "notices": list(self.notices),
+                "rows": rows, "partial": dict(self.partial), "levels": dict(self.levels), "notices": notices,
                 "roster": (r or {}).get("names", []), "roster_ok": bool(r and r["ok"]),
                 "mic_stale": bool(self.capture and self.capture.stale()), "status": self.status}
 

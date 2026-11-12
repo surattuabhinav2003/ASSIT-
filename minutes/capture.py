@@ -231,6 +231,7 @@ class Capture:
         self.listeners = {}
         self._client = client
         self._StreamSide = StreamSide
+        self.max_level = {"them": 0.0, "you": 0.0}
 
     def _side(self, who):
         def started(line):
@@ -263,7 +264,7 @@ class Capture:
         self.listeners["them"] = Listener(
             self.pa, self.pa.get_default_wasapi_loopback(), sink=self.sides["them"], agc=True, silence_ms=700,
             tap=(lambda x, now: self.writers["others"].add(x, now)) if "others" in self.writers else None,
-            on_level=lambda v: self.on_level("them", v))
+            on_level=lambda v: self._heard("them", v))
         try:
             mic = self.pa.get_device_info_by_index(wasapi["defaultInputDevice"])
             self.listeners["you"] = Listener(
@@ -271,10 +272,14 @@ class Capture:
                 tap=(lambda x, now: self.writers["you"].add(x, now)) if "you" in self.writers else None,
                 # with speakers (no headset) the mic also hears the other side: that is not you
                 keep=lambda a, b: self.listeners["them"].speaking_during(a, b) <= 0.5,
-                on_level=lambda v: self.on_level("you", v))
+                on_level=lambda v: self._heard("you", v))
         except Exception as e:
             print(f"[capture] no microphone: {e}")
             self.events("error", "you", None, "No microphone found: only the other side is recorded.", None)
+
+    def _heard(self, side, v):
+        self.max_level[side] = max(self.max_level.get(side, 0.0), v)
+        self.on_level(side, v)
 
     def devices(self):
         return {side: l.device_name for side, l in self.listeners.items()}
