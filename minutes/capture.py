@@ -253,8 +253,34 @@ class Capture:
             on_error=lambda msg: self.events("error", who, None, msg, None),
             on_start=started, on_end=ended)
 
+    def _loopback(self):
+        """The loopback of the default speaker. Windows sometimes cannot name the default output for a moment (a dock or
+        headset connecting): ask again with a fresh device list, then take any speaker loopback there is."""
+        last = None
+        for attempt in range(3):
+            try:
+                return self.pa.get_default_wasapi_loopback()
+            except Exception as e:
+                last = e
+                try:
+                    found = list(self.pa.get_loopback_device_info_generator())
+                    if found:
+                        print(f"[capture] default speaker not available ({e}); using {found[0]['name']}")
+                        return found[0]
+                except Exception as e2:
+                    last = e2
+                time.sleep(1.0)
+                try:
+                    self.pa.terminate()
+                except Exception:
+                    pass
+                self.pa = pyaudio.PyAudio()                          # re-reads the device list
+        raise RuntimeError("No speaker output was found to record the other side. Check the sound output in Windows "
+                           "(Settings, System, Sound) and try again.") from last
+
     def start(self, others_path=None, you_path=None):
         self.t0 = time.time()
+        loop_dev = self._loopback()
         wasapi = self.pa.get_host_api_info_by_type(pyaudio.paWASAPI)
         if others_path:
             self.writers["others"] = TrackWriter(others_path, self.t0)
@@ -262,7 +288,7 @@ class Capture:
             self.writers["you"] = TrackWriter(you_path, self.t0)
         self.sides = {"them": self._side("them"), "you": self._side("you")}
         self.listeners["them"] = Listener(
-            self.pa, self.pa.get_default_wasapi_loopback(), sink=self.sides["them"], agc=True, silence_ms=700,
+            self.pa, loop_dev, sink=self.sides["them"], agc=True, silence_ms=700,
             tap=(lambda x, now: self.writers["others"].add(x, now)) if "others" in self.writers else None,
             on_level=lambda v: self._heard("them", v))
         try:

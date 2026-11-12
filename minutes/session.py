@@ -12,6 +12,7 @@ class Session:
     def __init__(self, client, you_name, log=print):
         self.client, self.you_name, self.log = client, you_name, log
         self.mid = None
+        self.language = "en"
         self.capture = None
         self.roster = None
         self.t0 = None
@@ -29,6 +30,7 @@ class Session:
     # ---------------------------------------------------------------- recording
     def start(self, title, app, keep_audio=True, language="en"):
         from . import stream
+        self.language = language
         stream.LANGUAGE = {"en": "en", "te": "te"}.get(language)            # mixed: the model decides, word by word
         # the English live model writes mixed speech in Latin letters ("eweeklow"); this one writes Telugu script
         stream.MODEL = config.LIVE_MODEL if language == "en" else config.LIVE_MODEL_TELUGU
@@ -77,7 +79,7 @@ class Session:
             side = key[0]
             t0, t1 = self._spans.pop(key)
             text = self._texts.pop(key)
-            if text:
+            if text and not finish.is_noise(text, self.language):
                 self.rows.append({"id": len(self.rows) + 1, "side": side, "speaker": self._speaker(side),
                                   "t0": round(t0, 2), "t1": round(t1, 2), "text": text})
                 self.rows.sort(key=lambda r: r["t0"])

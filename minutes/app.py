@@ -299,7 +299,7 @@ class App:
         except Exception as e:
             log("[app] could not start: " + traceback.format_exc())
             self.session = None
-            return {"ok": False, "error": f"Could not start recording: {e}"}
+            return {"ok": False, "error": str(e) if isinstance(e, RuntimeError) else f"Could not start recording ({type(e).__name__}). Try Settings, Check audio."}
         self._auto_started = not manual
         self.suggestion = None
         self._tray_state()

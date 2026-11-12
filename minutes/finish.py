@@ -75,6 +75,12 @@ def fix_people(text, people):
     return re.sub(r"\b[A-Z][a-z]{3,}\b", swap, text)
 
 
+def is_noise(text, language="en"):
+    """True for a line that has no letters of the language spoken: the model heard a noise and invented a sound ("嗯")."""
+    pattern = r"[A-Za-z]" if language == "en" else r"[A-Za-z\u0C00-\u0C7F]"
+    return not re.search(pattern, text or "")
+
+
 def fix_known(text):
     for pat, rep in vocab()["rules"]:
         text = pat.sub(rep, text)
@@ -83,9 +89,13 @@ def fix_known(text):
 
 # ---------------------------------------------------------------- audio helpers
 def read_wav(path):
-    with wave.open(path, "rb") as w:
-        assert w.getframerate() == RATE and w.getnchannels() == 1
-        return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    try:
+        with wave.open(path, "rb") as w:
+            if w.getframerate() != RATE or w.getnchannels() != 1:
+                raise ValueError("unexpected audio format")
+            return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    except (EOFError, wave.Error) as e:
+        raise ValueError(f"the recording file could not be read ({type(e).__name__})") from e
 
 
 def to_wav_bytes(x):
@@ -487,7 +497,7 @@ def run(client, mid, roster=None, you_name="", status=lambda s: None, log=print)
     for v in voices:
         label = named.get(v["voice"]) or (f"Speaker {order[v['voice']]}" if not single else "Others")
         rows.append({"side": "them", "speaker": label, "t0": v["t0"], "t1": v["t1"], "text": v["text"]})
-    rows = [r for r in rows if r["text"].strip()]
+    rows = [r for r in rows if r["text"].strip() and not is_noise(r["text"], language)]
     rows.sort(key=lambda r: (r["t0"], r["t1"]))
     for i, r in enumerate(rows):
         r["id"] = i + 1
